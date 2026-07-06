@@ -1,0 +1,22 @@
+using PayMaestro.Domain.Entities;
+using PayMaestro.Domain.Gateways;
+
+namespace PayMaestro.Infrastructure.PaymentGateways;
+
+public class AlphaPayGateway : IPaymentGateway
+{
+    public string Name => "AlphaPay";
+
+    public async Task<GatewayResult> ProcessAsync(Payment payment, CancellationToken ct = default)
+    {
+        await Task.Delay(150, ct);   
+
+        if (payment.CardLast4 == "0000")
+            return new(GatewayResultType.HardDecline, "43", "Stolen card");
+
+        if (payment.CardLast4 == "1111")
+            return new(GatewayResultType.SoftDecline, "51", "Insufficient funds");
+
+        return new(GatewayResultType.Approved, "00", "Approved");
+    }
+}

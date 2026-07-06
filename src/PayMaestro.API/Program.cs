@@ -1,23 +1,30 @@
+using PayMaestro.API.Filters;
+using PayMaestro.Application.Options;
+using PayMaestro.Application.Services;
+using PayMaestro.Infrastructure;
+using PayMaestro.Infrastructure.Data;
+using PayMaestro.Infrastructure.DataAccess;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-
-builder.Services.AddControllers();
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddControllers(options => options.Filters.Add<ExceptionFilter>());
+builder.Services.Configure<GatewayRoutingOptions>(builder.Configuration.GetSection("GatewayRouting"));
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddScoped<PaymentOrchestrator>();
+builder.Services.AddScoped<CascadeExecutor>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    app.MapOpenApi();
+    var db = scope.ServiceProvider.GetRequiredService<PayMaestroDbContext>();
+    db.Database.EnsureCreated();     // demo-friendly; migrations in production
 }
 
-app.UseHttpsRedirection();
-
-app.UseAuthorization();
-
+app.UseSwagger();
+app.UseSwaggerUI();
 app.MapControllers();
 
 app.Run();
