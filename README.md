@@ -1,118 +1,112 @@
-# PayMaestro
+# PayMaestro — Mini Payment Orchestration API
 
-Payment orchestration API that routes card payments across multiple payment gateways with automatic failover (cascade), idempotency guarantees, and full attempt auditing.
+A .NET study project on **payment orchestration**: one API in front of many payment gateways, with smart routing, cascading retries, database-enforced idempotency and an audit-first design — inspired by how orchestration platforms serve the iGaming space.
 
-Built with **.NET 10**, **ASP.NET Core**, **EF Core (SQLite)** and organized with **Clean Architecture**.
+## Why this exists
 
-## How it works
+Payment orchestration is the layer *above* payment gateways: the merchant integrates once, many acquiring routes sit behind it, and the platform adds the intelligence — picking the best route per transaction, retrying safely when a route fails, and keeping evidence of everything. I built PayMaestro over a weekend, **spec-first**, to understand that domain hands-on. Every design decision is documented in [docs/SPEC.md](docs/SPEC.md).
 
-1. A payment request comes in with an `Idempotency-Key` header.
-2. If the key was already used, the stored result is replayed — **no double charge**. Reusing a key with a different amount or merchant reference is rejected.
-3. The router builds an ordered list of eligible gateways from configuration (currency support, amount limit, priority).
-4. The **cascade executor** tries each gateway in order:
-   - **Approved** → payment is authorized and captured, done.
-   - **SoftDecline / Error** (e.g. insufficient funds, gateway down) → try the next gateway.
-   - **HardDecline** (fraud signal, e.g. stolen card) → stop immediately, never retry elsewhere.
-5. Every gateway attempt is recorded (gateway, order, result, response code, duration) and returned in the response.
+## The pipeline
 
-## Project structure
-
-```
-src/
-  PayMaestro.Domain/          Entities (Payment, PaymentAttempt, FraudFlag),
-                              enums, gateway/repository abstractions, domain exceptions
-  PayMaestro.Application/     PaymentOrchestrator, CascadeExecutor, DTOs, routing options
-  PayMaestro.Infrastructure/  EF Core DbContext, repositories, unit of work,
-                              simulated gateways (AlphaPay, BetaPay, GammaPay)
-  PayMaestro.API/             Controllers, exception filter, composition root
-tests/
-  PayMaestro.Tests/           xUnit test project
+```mermaid
+flowchart TD
+    A["Merchant request + Idempotency-Key header"] --> B{"Key already seen?"}
+    B -- "yes" --> R["Replay stored result — no double charge"]
+    B -- "no" --> C["Create Payment (Pending)"]
+    C --> D["Router — eligibility + priority from config"]
+    D --> E["Try next gateway in route"]
+    E --> F{"Gateway result"}
+    F -- "Approved" --> G["Authorized, then Captured"]
+    F -- "HardDecline" --> H["Declined — never retry a stolen card"]
+    F -- "SoftDecline / Error" --> J{"More gateways?"}
+    J -- "yes" --> E
+    J -- "no" --> H
+    G --> I[("SQLite — payments, attempts, fraud flags")]
+    H --> I
 ```
 
-## Getting started
+## Payment lifecycle
 
-Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+Transitions are guarded **inside the aggregate** — an invalid transition throws a domain exception. There is no path back from `Captured`, and refunds only exist after capture (void vs refund).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending
+    Pending --> FraudRejected: fraud rule hit
+    Pending --> Declined: hard decline / routes exhausted
+    Pending --> Authorized: gateway approved
+    Authorized --> Captured: auto capture
+    Captured --> Refunded: roadmap
+```
+
+## Cascading in action
+
+Card ending `1111` is soft-declined by AlphaPay — a *recoverable* failure — so the orchestrator cascades and BetaPay saves the sale. A hard decline (card `0000`) would stop the cascade immediately: retrying a stolen card on another acquirer is not resilience.
+
+```mermaid
+sequenceDiagram
+    participant M as Merchant
+    participant O as PayMaestro
+    participant A as AlphaPay
+    participant B as BetaPay
+    M->>O: POST /api/payments (card ...1111)
+    O->>A: process attempt 1
+    A-->>O: SoftDecline (51 insufficient funds)
+    Note over O: recoverable — cascade continues
+    O->>B: process attempt 2
+    B-->>O: Approved (00)
+    Note over O: Authorized → Captured
+    O-->>M: 200 Captured + full attempt trail
+```
+
+## Key engineering decisions
+
+**Idempotency is enforced by the database, not just the code.** The idempotency key has a unique index, so two concurrent retries are serialised by the database itself — the losing insert is caught and the stored outcome is replayed. A check-then-insert in application code alone has a race window between the read and the write.
+
+**Hard vs soft declines drive the cascade policy.** Soft declines (insufficient funds, timeouts) and gateway errors cascade to the next route; hard declines (stolen or blocked cards) stop everything immediately.
+
+**Routing is configuration, not code.** Gateway eligibility (supported currencies, amount caps) and priority live in `appsettings.json`, bound with the options pattern. Adding an acquirer is one class and one config entry — no business logic changes (open/closed principle).
+
+**Rich domain model.** Private setters, factory creation and guarded transitions make invalid payment states unrepresentable by construction. My earlier projects used an anemic model; moving the invariants into the aggregate is a deliberate evolution.
+
+**Audit-first persistence.** Every gateway attempt (gateway, order, result code, duration) and every fraud flag is persisted, and deletes are restricted at the database level — payment records are treated as regulatory evidence. If an acquirer issues an RFI, `GET /api/payments/{id}` returns the evidence pack. PCI-aware by design: only the BIN and last four digits are ever stored, never the full PAN.
+
+**One class per reason to change.** The orchestrator coordinates the pipeline; `CascadeExecutor` owns the retry policy; each gateway implements a single Domain contract (dependency inversion — the Domain has zero external references).
+
+## Architecture
+
+Clean Architecture, modular monolith: `API → Application → Domain ← Infrastructure`. The Domain holds entities, the state machine and all contracts (gateways, fraud rules, repositories with read/write/update segregation and a unit of work); the Infrastructure implements them (EF Core + SQLite, mock gateways); the Application orchestrates use cases.
+
+## Run it
 
 ```bash
-dotnet build
 dotnet run --project src/PayMaestro.API
+# open the printed localhost URL + /swagger
 ```
 
-Swagger UI is available at `/swagger`. The SQLite database (`paymaestro.db`) is created automatically on first run.
-
-## API
-
-### Create a payment
-
-```bash
-curl -X POST http://localhost:5000/api/payments \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: order-123" \
-  -d '{
-    "merchantReference": "ORDER-123",
-    "customerId": "cust-42",
-    "amount": 250.00,
-    "currency": "EUR",
-    "cardNumber": "4111111111119999",
-    "customerIp": "203.0.113.10"
-  }'
-```
-
-Response includes the final status and the full attempt trail:
+`POST /api/payments` with header `Idempotency-Key: <any-uuid>` and body:
 
 ```json
 {
-  "id": "…",
-  "merchantReference": "ORDER-123",
-  "amount": 250.00,
+  "merchantReference": "ORDER-001",
+  "customerId": "customer-42",
+  "amount": 50,
   "currency": "EUR",
-  "cardLast4": "9999",
-  "status": "Captured",
-  "attempts": [
-    { "gatewayName": "AlphaPay", "attemptOrder": 1, "resultType": "Approved", "gatewayResponseCode": "00", "durationMs": 152 }
-  ]
+  "cardNumber": "4111111111111111",
+  "customerIp": "185.89.10.20"
 }
 ```
 
-### Get a payment
+| Card ending | Behaviour |
+|---|---|
+| `0000` | Hard decline everywhere — cascade stops, payment `Declined` |
+| `1111` | Soft decline on AlphaPay — cascades to BetaPay |
+| `2222` | Soft decline on BetaPay |
+| `3333` | Gateway error on GammaPay |
+| anything else | Approved on the first eligible gateway |
 
-```bash
-curl http://localhost:5000/api/payments/{id}
-```
+Also try: an amount above 5000 EUR (skips AlphaPay's cap — routing in action), a currency no gateway supports (declined with zero attempts), and the same `Idempotency-Key` twice (identical response, no second charge; same key with a *different* amount returns `422`).
 
-## Gateway routing
+## What's next
 
-Routing is configuration-driven (`appsettings.json`) — no code change needed to add, remove, or reprioritize gateways:
-
-```json
-"GatewayRouting": {
-  "Gateways": [
-    { "Name": "AlphaPay", "Priority": 1, "SupportedCurrencies": ["EUR", "GBP"], "MaxAmount": 5000 },
-    { "Name": "BetaPay",  "Priority": 2, "SupportedCurrencies": ["EUR", "USD"], "MaxAmount": 10000 },
-    { "Name": "GammaPay", "Priority": 3, "SupportedCurrencies": ["EUR", "USD", "GBP"], "MaxAmount": 2000 }
-  ]
-}
-```
-
-## Simulating gateway outcomes
-
-The three built-in gateways are simulators. The **last 4 digits of the card number** control the outcome:
-
-| Card ends in | AlphaPay | BetaPay | GammaPay |
-|---|---|---|---|
-| `0000` | Hard decline (stolen card) | Hard decline | Hard decline |
-| `1111` | Soft decline (insufficient funds) | Approved | Approved |
-| `2222` | Approved | Soft decline | Approved |
-| `3333` | Approved | Approved | Error (gateway unavailable) |
-| anything else | Approved | Approved | Approved |
-
-Example: a `…1111` card in EUR is soft-declined by AlphaPay, then cascades to BetaPay and is approved — the response shows both attempts.
-
-## Error handling
-
-A global `ExceptionFilter` maps domain exceptions to HTTP responses:
-
-- Missing `Idempotency-Key` header → `400 Bad Request`
-- Idempotency key reuse with a different payload → `422 Unprocessable Entity`
-- Invalid payment state transition → `409 Conflict`
-- Other domain/validation errors → `400 Bad Request`
+The fraud engine: the `IFraudRule` contract is already in the Domain, and three rules are specified in [docs/SPEC.md](docs/SPEC.md) — velocity (repeated declined attempts), geo mismatch (IP country vs card country) and amount anomaly. The rule design is informed by the iGaming Academy **Anti-Fraud & Payments Handling** certification ([docs/certificates](docs/certificates)). After that: unit tests for the state machine and cascade policy, then CI/CD to Azure Container Apps — the same pipeline as my [Sports Betting API](https://github.com/DeVFirmino/SportsBetting), which runs there today.
