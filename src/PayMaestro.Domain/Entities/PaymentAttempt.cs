@@ -19,6 +19,8 @@ public class PaymentAttempt : EntityBase
         int durationMs) => new()
     {
         PaymentId = paymentId,
+        
+        
         GatewayName = gatewayName,
         AttemptOrder = attemptOrder,
         ResultType = resultType,

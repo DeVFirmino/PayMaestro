@@ -1,8 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using PayMaestro.Infrastructure.Data;
 
-namespace PayMaestro.Infrastructure.DataAccess;
+namespace PayMaestro.Infrastructure.Data;
 
 public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<PayMaestroDbContext>
 {

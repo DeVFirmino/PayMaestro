@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using PayMaestro.Domain.Entities;
 
-namespace PayMaestro.Infrastructure.DataAccess.Configurations;
+namespace PayMaestro.Infrastructure.Data.Configurations;
 
 public class FraudFlagConfiguration : IEntityTypeConfiguration<FraudFlag>
 {

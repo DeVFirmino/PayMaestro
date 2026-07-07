@@ -53,7 +53,7 @@ public class Payment : EntityBase
         };
     }
 
-    public void RecordAttempt(PaymentAttempt attempt)   // modelo #2, completo
+    public void RecordAttempt(PaymentAttempt attempt)
     {
         Attempts.Add(attempt);
         UpdatedAt = DateTime.UtcNow;
@@ -65,7 +65,7 @@ public class Payment : EntityBase
         UpdatedAt = DateTime.UtcNow;
     }
 
-    public void Authorize()                             // modelo #1 (já era seu)
+    public void Authorize()
     {
         if (Status != PaymentStatus.Pending)
             throw new InvalidStateTransitionException(Status, PaymentStatus.Authorized);

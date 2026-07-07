@@ -1,4 +1,4 @@
-using PayMaestro.Domain.Entities;
+using PayMaestro.Domain.Enums;
 
 namespace PayMaestro.Domain.Gateways;
 

@@ -4,6 +4,13 @@ using PayMaestro.Domain.Gateways;
 
 namespace PayMaestro.Application.Services;
 
+/// <summary>
+/// Tries each gateway in the route until one approves.
+/// Soft declines and gateway errors fall through to the next gateway;
+/// a hard decline (fraud signal) stops the cascade immediately —
+/// a suspected stolen card must never be retried on another acquirer.
+/// Every attempt is recorded on the payment for auditing.
+/// </summary>
 public class CascadeExecutor
 {
     public async Task ExecuteAsync(Payment payment, IReadOnlyList<IPaymentGateway> route)
