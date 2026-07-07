@@ -1,7 +1,9 @@
 using Microsoft.OpenApi;
 using PayMaestro.API.Filters;
+using PayMaestro.Application.Fraud;
 using PayMaestro.Application.Options;
 using PayMaestro.Application.Services;
+using PayMaestro.Domain.Fraud;
 using PayMaestro.Infrastructure;
 using PayMaestro.Infrastructure.Data;
 
@@ -27,6 +29,7 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<PaymentOrchestrator>();
 builder.Services.AddScoped<CascadeExecutor>();
+builder.Services.AddScoped<IFraudRule, DeclineVelocityRule>();
 
 var app = builder.Build();
 

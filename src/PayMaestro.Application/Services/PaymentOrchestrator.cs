@@ -3,6 +3,7 @@ using PayMaestro.Application.Communication;
 using PayMaestro.Application.Options;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Exceptions;
+using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories;
 using PayMaestro.Domain.Repositories.PaymentRepository;
@@ -18,14 +19,10 @@ public class PaymentOrchestrator(
     IPaymentWriteOnlyRepository writeRepo,
     IUnitOfWork unitOfWork,
     IEnumerable<IPaymentGateway> gateways,
+    IEnumerable<IFraudRule> fraudRules,
     IOptions<GatewayRoutingOptions> routingOptions,
     CascadeExecutor cascade)
 {
-    // Velocity rule: a card declined this many times within the window is
-    // treated as card testing / stolen-card probing and rejected upfront.
-    private const int MaxRecentDeclines = 3;
-    private static readonly TimeSpan DeclineWindow = TimeSpan.FromHours(24);
-
     public async Task<ResponsePaymentJson> CreatePayment(string idempotencyKey, RequestCreatePaymentJson request)
     {
         var existing = await readRepo.GetByIdempotencyKey(idempotencyKey);
@@ -34,13 +31,24 @@ public class PaymentOrchestrator(
 
         var payment = CreatePaymentFrom(idempotencyKey, request);
 
-        if (await ExceedsDeclineVelocity(payment))
-            RejectAsFraud(payment);          // no gateway is ever contacted
+        if (await ScreenForFraud(payment))
+            payment.RejectAsFraud();         // no gateway is ever contacted
         else
             await cascade.ExecuteAsync(payment, ResolveRoute(payment));
 
-        await writeRepo.Add(payment);        // fraud-rejected payments are stored too (audit trail)
-        await unitOfWork.Commit();
+        try
+        {
+            await writeRepo.Add(payment);    // fraud-rejected payments are stored too (audit trail)
+            await unitOfWork.Commit();
+        }
+        catch (UniqueConstraintViolationException)
+        {
+            // A concurrent request with the same idempotency key won the race:
+            // the unique index serialized us, so replay the winner's outcome.
+            var winner = await readRepo.GetByIdempotencyKey(idempotencyKey);
+            if (winner is null) throw;
+            return ReplayExisting(winner, request);
+        }
 
         return ToResponse(payment);
     }
@@ -59,18 +67,22 @@ public class PaymentOrchestrator(
         return ToResponse(existing);         // replay: no double charge
     }
 
-    private async Task<bool> ExceedsDeclineVelocity(Payment payment)
-        => await readRepo.CountRecentDeclinedAttempts(payment.CardBin, payment.CardLast4, DeclineWindow)
-           >= MaxRecentDeclines;
-
-    private static void RejectAsFraud(Payment payment)
+    /// <summary>Runs every registered fraud rule; each hit is recorded as a FraudFlag.</summary>
+    private async Task<bool> ScreenForFraud(Payment payment)
     {
-        payment.AddFraudFlag(FraudFlag.Create(
-            payment.Id,
-            ruleName: "DeclineVelocity",
-            details: $"Card reached {MaxRecentDeclines} declined attempts within {DeclineWindow.TotalHours}h."));
+        var suspicious = false;
 
-        payment.RejectAsFraud();
+        foreach (var rule in fraudRules)
+        {
+            var verdict = await rule.EvaluateAsync(payment);
+            if (!verdict.IsSuspicious)
+                continue;
+
+            payment.AddFraudFlag(FraudFlag.Create(payment.Id, rule.RuleName, verdict.Details ?? ""));
+            suspicious = true;
+        }
+
+        return suspicious;
     }
 
     private static Payment CreatePaymentFrom(string idempotencyKey, RequestCreatePaymentJson request)

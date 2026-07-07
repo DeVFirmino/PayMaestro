@@ -19,9 +19,11 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(p => p.CardLast4).HasMaxLength(4);
         builder.Property(p => p.Status).HasConversion<string>();
 
-        builder.HasMany(p => p.Attempts).WithOne().HasForeignKey(a => a.PaymentId);
-        builder.HasMany(p => p.FraudFlags).WithOne().HasForeignKey(f => f.PaymentId);
-        
-        
+        // Restrict: attempts and fraud flags are audit evidence — deleting a
+        // payment must never silently delete its history.
+        builder.HasMany(p => p.Attempts).WithOne()
+            .HasForeignKey(a => a.PaymentId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasMany(p => p.FraudFlags).WithOne()
+            .HasForeignKey(f => f.PaymentId).OnDelete(DeleteBehavior.Restrict);
     }
 }
