@@ -41,11 +41,9 @@ using (var scope = app.Services.CreateScope())
 
 app.UseSwagger();
 app.UseSwaggerUI(options =>
-{
-    options.SwaggerEndpoint("/swagger/v1/swagger.json", "PayMaestro API v1");
-    options.RoutePrefix = string.Empty;   // serve Swagger UI at the root URL
-});
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "PayMaestro API v1"));
 
 app.MapControllers();
+app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

@@ -17,6 +17,7 @@ public class PaymentsController(PaymentOrchestrator orchestrator) : ControllerBa
     /// <response code="200">Payment processed; the body contains the final status and every gateway attempt.</response>
     /// <response code="400">Missing or invalid request fields, or missing Idempotency-Key header.</response>
     /// <response code="422">The Idempotency-Key was already used with a different payload.</response>
+    
     [HttpPost]
     [ProducesResponseType(typeof(ResponsePaymentJson), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ResponseErrorJson), StatusCodes.Status400BadRequest)]
