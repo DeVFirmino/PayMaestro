@@ -6,6 +6,8 @@ A .NET study project on **payment orchestration**: one API in front of many paym
 
 Payment orchestration is the layer *above* payment gateways: the merchant integrates once, many acquiring routes sit behind it, and the platform adds the intelligence — picking the best route per transaction, retrying safely when a route fails, and keeping evidence of everything. I built PayMaestro over a weekend, **spec-first**, to understand that domain hands-on. Every design decision is documented in [docs/SPEC.md](docs/SPEC.md).
 
+**A note on how it was built:** I developed this project with AI assistance (Claude Code) as a pair programmer — it helped me scaffold, review and polish the implementation, the same way I'd use it on a real job. The spec, the domain decisions and the understanding behind them are mine, and I can walk through any part of the code and explain why it works the way it does.
+
 ## The pipeline
 
 ```mermaid
