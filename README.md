@@ -2,6 +2,8 @@
 
 A .NET study project on **payment orchestration**: one API in front of many payment gateways, with smart routing, cascading retries, database-enforced idempotency, fraud screening and an audit-first design — inspired by how orchestration platforms serve the iGaming space.
 
+> 🎓 The anti-fraud design follows the best practices of **Anti-Fraud & Payments Handling** taught by the **iGaming Academy** — see my [certificate](docs/certificates/Daniel_Silva_Anti_Fraud_and_Payments_Handling_2026.pdf).
+
 ## Why this exists
 
 Payment orchestration is the layer *above* payment gateways: the merchant integrates once, many acquiring routes sit behind it, and the platform adds the intelligence — picking the best route per transaction, retrying safely when a route fails, and keeping evidence of everything. I built PayMaestro over a weekend, **spec-first**, to understand that domain hands-on. Every design decision is documented in [docs/SPEC.md](docs/SPEC.md).
@@ -70,7 +72,7 @@ sequenceDiagram
 
 **Hard vs soft declines drive the cascade policy.** Soft declines (insufficient funds, timeouts) and gateway errors cascade to the next route; hard declines (stolen or blocked cards) stop everything immediately.
 
-**Fraud screening runs before any gateway is contacted.** Rules implement the `IFraudRule` Domain contract and every hit is stored as a `FraudFlag`. The first rule is live: **decline velocity** — a card with 3+ declined attempts in 24h is the classic card-testing pattern, so it's rejected with zero gateway calls. The rule design is informed by the iGaming Academy **Anti-Fraud & Payments Handling** certification ([docs/certificates](docs/certificates)).
+**Fraud screening runs before any gateway is contacted.** Rules implement the `IFraudRule` Domain contract and every hit is stored as a `FraudFlag`. The first rule is live: **decline velocity** — a card with 3+ declined attempts in 24h is the classic card-testing pattern, so it's rejected with zero gateway calls. The rule design is informed by the iGaming Academy **Anti-Fraud & Payments Handling** certification ([see certificate](docs/certificates/Daniel_Silva_Anti_Fraud_and_Payments_Handling_2026.pdf)).
 
 **Routing is configuration, not code.** Gateway eligibility (supported currencies, amount caps) and priority live in `appsettings.json`, bound with the options pattern. Adding an acquirer is one class and one config entry — no business logic changes (open/closed principle).
 
