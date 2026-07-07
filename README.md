@@ -96,7 +96,7 @@ dotnet test
 
 ```bash
 dotnet run --project src/PayMaestro.API
-# open http://localhost:5225 — Swagger UI is served at the root
+# the browser opens Swagger automatically — or go to http://localhost:5225/swagger
 ```
 
 `POST /api/payments` with header `Idempotency-Key: <any-uuid>` and body:
