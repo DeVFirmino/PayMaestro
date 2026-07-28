@@ -19,6 +19,13 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(p => p.CardLast4).HasMaxLength(4);
         builder.Property(p => p.Status).HasConversion<string>();
 
+        // Payment.Create guards this too, but a C# factory only holds while every
+        // write goes through it. A migration or a bulk import would not.
+        // The CAST is load-bearing: SQLite stores decimal as TEXT, so a bare
+        // "Amount > 0" compares strings and lets '0.00' through.
+        builder.ToTable(t => t.HasCheckConstraint(
+            "CK_Payment_Amount_Positive", "CAST(Amount AS REAL) > 0"));
+
         // Restrict: attempts and fraud flags are audit evidence — deleting a
         // payment must never silently delete its history.
         builder.HasMany(p => p.Attempts).WithOne()
