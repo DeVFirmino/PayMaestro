@@ -111,7 +111,10 @@ namespace PayMaestro.Infrastructure.Migrations
                     b.HasIndex("IdempotencyKey")
                         .IsUnique();
 
-                    b.ToTable("Payment");
+                    b.ToTable("Payment", t =>
+                        {
+                            t.HasCheckConstraint("CK_Payment_Amount_Positive", "CAST(Amount AS REAL) > 0");
+                        });
                 });
 
             modelBuilder.Entity("PayMaestro.Domain.Entities.PaymentAttempt", b =>
@@ -159,7 +162,7 @@ namespace PayMaestro.Infrastructure.Migrations
                     b.HasOne("PayMaestro.Domain.Entities.Payment", null)
                         .WithMany("FraudFlags")
                         .HasForeignKey("PaymentId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
@@ -168,7 +171,7 @@ namespace PayMaestro.Infrastructure.Migrations
                     b.HasOne("PayMaestro.Domain.Entities.Payment", null)
                         .WithMany("Attempts")
                         .HasForeignKey("PaymentId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
