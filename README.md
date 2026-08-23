@@ -12,7 +12,7 @@ Payment orchestration is the layer *above* payment gateways: the merchant integr
 
 ## The pipeline
 
-![Architecture diagram: a client POSTs to /api/payments with an Idempotency-Key; the orchestrator runs idempotency check, fraud screening, route resolution and the cascade across AlphaPay/BetaPay/GammaPay, then persists to SQLite; the payment lifecycle runs Pending to Authorized to Captured, with FraudRejected and Declined as terminal branches](docs/img/architecture.svg)
+![Diagram showing how PayMaestro receives a payment, avoids charging the same request twice, checks for fraud, tries payment providers, and saves the final result](docs/img/architecture.svg)
 
 *Editable source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — open it on [excalidraw.com](https://excalidraw.com) to edit, then re-export the SVG.*
 
