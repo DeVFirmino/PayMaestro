@@ -12,59 +12,17 @@ Payment orchestration is the layer *above* payment gateways: the merchant integr
 
 ## The pipeline
 
-```mermaid
-flowchart TD
-    A["Merchant request + Idempotency-Key header"] --> B{"Key already seen?"}
-    B -- "yes" --> R["Replay stored result — no double charge"]
-    B -- "no" --> C["Create Payment (Pending)"]
-    C --> K{"Fraud rules"}
-    K -- "rule hit" --> L["FraudRejected — no gateway ever contacted"]
-    K -- "clean" --> D["Router — eligibility + priority from config"]
-    D --> E["Try next gateway in route"]
-    E --> F{"Gateway result"}
-    F -- "Approved" --> G["Authorized, then Captured"]
-    F -- "HardDecline" --> H["Declined — never retry a stolen card"]
-    F -- "SoftDecline / Error" --> J{"More gateways?"}
-    J -- "yes" --> E
-    J -- "no" --> H
-    G --> I[("SQLite — payments, attempts, fraud flags")]
-    H --> I
-    L --> I
-```
+![Architecture diagram: a client POSTs to /api/payments with an Idempotency-Key; the orchestrator runs idempotency check, fraud screening, route resolution and the cascade across AlphaPay/BetaPay/GammaPay, then persists to SQLite; the payment lifecycle runs Pending to Authorized to Captured, with FraudRejected and Declined as terminal branches](docs/img/architecture.svg)
+
+*Editable source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — open it on [excalidraw.com](https://excalidraw.com) to edit, then re-export the SVG.*
 
 ## Payment lifecycle
 
-Transitions are guarded **inside the aggregate** — an invalid transition throws a domain exception. There is no path back from `Captured`, and refunds only exist after capture (void vs refund).
-
-```mermaid
-stateDiagram-v2
-    [*] --> Pending
-    Pending --> FraudRejected: fraud rule hit
-    Pending --> Declined: hard decline / routes exhausted
-    Pending --> Authorized: gateway approved
-    Authorized --> Captured: auto capture
-    Captured --> Refunded: roadmap
-```
+Transitions are guarded **inside the aggregate** — an invalid transition throws a domain exception. There is no path back from `Captured`, and refunds only exist after capture (void vs refund). The lifecycle strip in the diagram above shows the full picture: `Pending → Authorized → Captured`, with `FraudRejected` and `Declined` as terminal branches (`Captured → Refunded` is roadmap).
 
 ## Cascading in action
 
-Card ending `1111` is soft-declined by AlphaPay — a *recoverable* failure — so the orchestrator cascades and BetaPay saves the sale. A hard decline (card `0000`) would stop the cascade immediately: retrying a stolen card on another acquirer is not resilience.
-
-```mermaid
-sequenceDiagram
-    participant M as Merchant
-    participant O as PayMaestro
-    participant A as AlphaPay
-    participant B as BetaPay
-    M->>O: POST /api/payments (card ...1111)
-    O->>A: process attempt 1
-    A-->>O: SoftDecline (51 insufficient funds)
-    Note over O: recoverable — cascade continues
-    O->>B: process attempt 2
-    B-->>O: Approved (00)
-    Note over O: Authorized → Captured
-    O-->>M: 200 Captured + full attempt trail
-```
+Card ending `1111` is soft-declined by AlphaPay — a *recoverable* failure — so the orchestrator cascades and BetaPay saves the sale: attempt 1 comes back `SoftDecline (51 insufficient funds)`, attempt 2 gets `Approved (00)`, and the merchant receives `200 Captured` with the full attempt trail. A hard decline (card `0000`) would stop the cascade immediately: retrying a stolen card on another acquirer is not resilience.
 
 ## Key engineering decisions
 
