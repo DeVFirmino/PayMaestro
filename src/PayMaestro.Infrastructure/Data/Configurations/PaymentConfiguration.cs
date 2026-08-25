@@ -11,7 +11,7 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Id).ValueGeneratedNever();
 
-        builder.HasIndex(p => p.IdempotencyKey).IsUnique();    
+        builder.HasIndex(p => p.IdempotencyKey).IsUnique();
         builder.Property(p => p.IdempotencyKey).IsRequired().HasMaxLength(100);
 
         builder.Property(p => p.Amount).HasPrecision(18, 2);  //  

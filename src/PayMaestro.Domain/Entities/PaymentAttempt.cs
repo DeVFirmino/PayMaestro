@@ -24,13 +24,13 @@ public class PaymentAttempt : EntityBase
     public static PaymentAttempt Create(Guid paymentId, string gatewayName,
         int attemptOrder, GatewayResultType resultType, string gatewayResponseCode,
         int durationMs, string providerIdempotencyKey) => new()
-    {
-        PaymentId = paymentId,
-        GatewayName = gatewayName,
-        AttemptOrder = attemptOrder,
-        ResultType = resultType,
-        GatewayResponseCode = gatewayResponseCode,
-        DurationMs = durationMs,
-        ProviderIdempotencyKey = providerIdempotencyKey
-    };
+        {
+            PaymentId = paymentId,
+            GatewayName = gatewayName,
+            AttemptOrder = attemptOrder,
+            ResultType = resultType,
+            GatewayResponseCode = gatewayResponseCode,
+            DurationMs = durationMs,
+            ProviderIdempotencyKey = providerIdempotencyKey
+        };
 }
