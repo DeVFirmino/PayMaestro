@@ -1,20 +1,16 @@
 # PayMaestro — Mini Payment Orchestration API
 
-A .NET study project on **payment orchestration**: one API in front of many payment gateways, with smart routing, cascading retries, database-enforced idempotency, fraud screening and an audit-first design — inspired by how orchestration platforms serve the iGaming space.
-
-> 🎓 The anti-fraud design follows the best practices of **Anti-Fraud & Payments Handling** taught by the **iGaming Academy** — see my [certificate](docs/certificates/Daniel_Silva_Anti_Fraud_and_Payments_Handling_2026.pdf).
+A .NET study project on **payment orchestration**: one API in front of many payment gateways, with smart routing, decline-aware cascades, completed-outcome replay, fraud screening and an audit-first design — inspired by how orchestration platforms serve the iGaming space.
 
 ## Why this exists
 
 Payment orchestration is the layer *above* payment gateways: the merchant integrates once, many acquiring routes sit behind it, and the platform adds the intelligence — picking the best route per transaction, retrying safely when a route fails, and keeping evidence of everything. I built PayMaestro over a weekend, **spec-first**, to understand that domain hands-on. Every design decision is documented in [docs/SPEC.md](docs/SPEC.md).
 
-**A note on how it was built:** I developed this project with AI assistance (Claude Code) as a pair programmer — it helped me scaffold, review and polish the implementation, the same way I'd use it on a real job. The spec, the domain decisions and the understanding behind them are mine, and I can walk through any part of the code and explain why it works the way it does.
-
 ## The pipeline
 
-![Diagram showing how PayMaestro receives a payment, avoids charging the same request twice, checks for fraud, tries payment providers, and saves the final result](docs/img/architecture.svg)
+`request → completed-outcome replay → fraud screening → route selection → decline-aware gateway cascade → persistence`
 
-*Editable source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — open it on [excalidraw.com](https://excalidraw.com) to edit, then re-export the SVG.*
+The replay step skips gateway work when the key already has a stored result. A concurrent first use is a different problem: this study implementation contacts its mock gateway before it reserves the key, so a real integration would need an earlier in-progress reservation plus the provider's idempotency and reconciliation mechanisms.
 
 ## Payment lifecycle
 
@@ -26,11 +22,11 @@ Card ending `1111` is soft-declined by AlphaPay — a *recoverable* failure — 
 
 ## Key engineering decisions
 
-**Idempotency is enforced by the database, not just the code.** The idempotency key has a unique index, so two concurrent retries are serialised by the database itself — the losing insert is caught and the stored outcome is replayed. A check-then-insert in application code alone has a race window between the read and the write.
+**Idempotency is modelled at two levels.** A completed key replays its stored result, and a unique database index prevents duplicate payment rows. The current flow still contacts the mock gateway before it reserves the key. Two concurrent first requests could therefore both reach a real provider before one insert loses the database race. A production integration would reserve an in-progress record first, use the provider's idempotency contract and reconcile uncertain outcomes.
 
 **Hard vs soft declines drive the cascade policy.** Soft declines (insufficient funds, timeouts) and gateway errors cascade to the next route; hard declines (stolen or blocked cards) stop everything immediately.
 
-**Fraud screening runs before any gateway is contacted.** Rules implement the `IFraudRule` Domain contract and every hit is stored as a `FraudFlag`. The first rule is live: **decline velocity** — a card with 3+ declined attempts in 24h is the classic card-testing pattern, so it's rejected with zero gateway calls. The rule design is informed by the iGaming Academy **Anti-Fraud & Payments Handling** certification ([see certificate](docs/certificates/Daniel_Silva_Anti_Fraud_and_Payments_Handling_2026.pdf)).
+**Fraud screening runs before any gateway is contacted.** Rules implement the `IFraudRule` Domain contract and every hit is stored as a `FraudFlag`. The first rule is live: **decline velocity** — a card with 3+ declined attempts in 24h is a card-testing pattern, so it is rejected with zero gateway calls.
 
 **Routing is configuration, not code.** Gateway eligibility (supported currencies, amount caps) and priority live in `appsettings.json`, bound with the options pattern. Adding an acquirer is one class and one config entry — no business logic changes (open/closed principle).
 
@@ -78,7 +74,7 @@ dotnet run --project src/PayMaestro.API
 | `3333` | Gateway error on GammaPay |
 | anything else | Approved on the first eligible gateway |
 
-Also try: an amount above 5000 EUR (skips AlphaPay's cap — routing in action), a currency no gateway supports (declined with zero attempts), the same `Idempotency-Key` twice (identical response, no second charge; same key with a *different* amount returns `422`) — and the fraud rule: decline card `…0000` three times, and the **fourth** payment on that card comes back `FraudRejected` with an empty attempt list, because the velocity rule blocked it before any gateway was called.
+Also try: an amount above 5000 EUR (skips AlphaPay's cap — routing in action), a currency no gateway supports (declined with zero attempts), the same `Idempotency-Key` again after completion (identical stored response; the same key with a *different* amount returns `422`) — and the fraud rule: decline card `…0000` three times, and the **fourth** payment on that card comes back `FraudRejected` with an empty attempt list, because the velocity rule blocked it before any gateway was called.
 
 ## What's next
 

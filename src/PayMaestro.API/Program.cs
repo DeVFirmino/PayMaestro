@@ -19,7 +19,7 @@ builder.Services.AddSwaggerGen(options =>
         Title = "PayMaestro API",
         Version = "v1",
         Description = "Payment orchestration API: multi-gateway cascade with automatic failover, "
-                    + "idempotency protection and fraud velocity screening."
+                    + "completed-outcome replay and fraud velocity screening."
     });
 
     // Pull the /// comments from controllers and DTOs into the Swagger UI.
