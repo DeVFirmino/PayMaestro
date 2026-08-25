@@ -4,20 +4,16 @@ using PayMaestro.Domain.Gateways;
 
 namespace PayMaestro.Infrastructure.PaymentGateways;
 
-public class AlphaPayGateway : IPaymentGateway
+public class AlphaPayGateway(MockProviderLedger ledger) : MockGateway(ledger)
 {
-    public string Name => "AlphaPay";
+    public override string Name => "AlphaPay";
 
-    public async Task<GatewayResult> ProcessAsync(Payment payment, CancellationToken ct = default)
+    protected override TimeSpan Latency => TimeSpan.FromMilliseconds(150);
+
+    protected override GatewayResult Decide(Payment payment) => payment.CardLast4 switch
     {
-        await Task.Delay(150, ct);   
-
-        if (payment.CardLast4 == "0000")
-            return new(GatewayResultType.HardDecline, "43", "Stolen card");
-
-        if (payment.CardLast4 == "1111")
-            return new(GatewayResultType.SoftDecline, "51", "Insufficient funds");
-
-        return new(GatewayResultType.Approved, "00", "Approved");
-    }
+        "0000" => new(GatewayResultType.HardDecline, "43", "Stolen card"),
+        "1111" => new(GatewayResultType.SoftDecline, "51", "Insufficient funds"),
+        _ => new(GatewayResultType.Approved, "00", "Approved")
+    };
 }

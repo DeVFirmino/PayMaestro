@@ -9,6 +9,7 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
     public void Configure(EntityTypeBuilder<Payment> builder)
     {
         builder.HasKey(p => p.Id);
+        builder.Property(p => p.Id).ValueGeneratedNever();
 
         builder.HasIndex(p => p.IdempotencyKey).IsUnique();    
         builder.Property(p => p.IdempotencyKey).IsRequired().HasMaxLength(100);
@@ -18,6 +19,10 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(p => p.CardBin).HasMaxLength(6);
         builder.Property(p => p.CardLast4).HasMaxLength(4);
         builder.Property(p => p.Status).HasConversion<string>();
+
+        // Optimistic concurrency: the UPDATE carries the stamp the writer loaded, so a writer
+        // working from a stale payment fails instead of overwriting a settled outcome.
+        builder.Property(p => p.ConcurrencyStamp).IsConcurrencyToken();
 
         // Payment.Create guards this too, but a C# factory only holds while every
         // write goes through it. A migration or a bulk import would not.

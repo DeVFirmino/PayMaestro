@@ -20,7 +20,6 @@ namespace PayMaestro.Infrastructure.Migrations
             modelBuilder.Entity("PayMaestro.Domain.Entities.FraudFlag", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
@@ -49,7 +48,6 @@ namespace PayMaestro.Infrastructure.Migrations
             modelBuilder.Entity("PayMaestro.Domain.Entities.Payment", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Amount")
@@ -68,6 +66,10 @@ namespace PayMaestro.Infrastructure.Migrations
                     b.Property<string>("CardLast4")
                         .IsRequired()
                         .HasMaxLength(4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
@@ -120,7 +122,6 @@ namespace PayMaestro.Infrastructure.Migrations
             modelBuilder.Entity("PayMaestro.Domain.Entities.PaymentAttempt", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("AttemptOrder")
@@ -142,6 +143,11 @@ namespace PayMaestro.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("PaymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderIdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ResultType")

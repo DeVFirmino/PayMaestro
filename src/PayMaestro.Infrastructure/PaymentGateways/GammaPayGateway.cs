@@ -4,20 +4,16 @@ using PayMaestro.Domain.Gateways;
 
 namespace PayMaestro.Infrastructure.PaymentGateways;
 
-public class GammaPayGateway : IPaymentGateway
+public class GammaPayGateway(MockProviderLedger ledger) : MockGateway(ledger)
 {
-    public string Name => "GammaPay";
+    public override string Name => "GammaPay";
 
-    public async Task<GatewayResult> ProcessAsync(Payment payment, CancellationToken ct = default)
+    protected override TimeSpan Latency => TimeSpan.FromMilliseconds(100);
+
+    protected override GatewayResult Decide(Payment payment) => payment.CardLast4 switch
     {
-        await Task.Delay(100, ct);
-
-        if (payment.CardLast4 == "0000")
-            return new(GatewayResultType.HardDecline, "43", "Stolen card");
-
-        if (payment.CardLast4 == "3333")
-            return new(GatewayResultType.Error, "96", "Gateway unavailable");
-
-        return new(GatewayResultType.Approved, "00", "Approved");
-    }
+        "0000" => new(GatewayResultType.HardDecline, "43", "Stolen card"),
+        "3333" => new(GatewayResultType.Error, "96", "Gateway unavailable"),
+        _ => new(GatewayResultType.Approved, "00", "Approved")
+    };
 }
