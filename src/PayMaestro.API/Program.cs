@@ -28,6 +28,7 @@ builder.Services.AddSwaggerGen(options =>
 
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<PaymentOrchestrator>();
+builder.Services.AddScoped<PaymentReconciler>();
 builder.Services.AddScoped<CascadeExecutor>();
 builder.Services.AddScoped<IFraudRule, DeclineVelocityRule>();
 

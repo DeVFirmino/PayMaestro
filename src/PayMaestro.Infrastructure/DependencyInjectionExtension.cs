@@ -23,6 +23,9 @@ public static class DependencyInjectionExtension
         services.AddScoped<IPaymentUpdateOnlyRepository, PaymentRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 
+        // The mock acquirers share one ledger so a key they already settled is recognised
+        // across requests, the way a real provider's idempotency contract behaves.
+        services.AddSingleton<MockProviderLedger>();
         services.AddScoped<IPaymentGateway, AlphaPayGateway>();
         services.AddScoped<IPaymentGateway, BetaPayGateway>();
         services.AddScoped<IPaymentGateway, GammaPayGateway>();

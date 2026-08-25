@@ -18,8 +18,18 @@ public class Payment : EntityBase
     public PaymentStatus Status { get; private set; }
     public DateTime UpdatedAt { get; private set; }
 
+    /// <summary>
+    /// Optimistic concurrency token. Every transition changes it, so a writer holding
+    /// a stale copy of the payment loses instead of overwriting a newer outcome.
+    /// </summary>
+    public Guid ConcurrencyStamp { get; private set; } = Guid.NewGuid();
+
     public List<PaymentAttempt> Attempts { get; private set; } = [];
     public List<FraudFlag> FraudFlags { get; private set; } = [];
+
+    /// <summary>The outcome is settled: replaying this payment must never call a gateway again.</summary>
+    public bool IsTerminal => Status is PaymentStatus.Captured or PaymentStatus.Declined
+        or PaymentStatus.FraudRejected or PaymentStatus.Refunded;
 
     private Payment() { } // EF Core
 
@@ -53,52 +63,85 @@ public class Payment : EntityBase
         };
     }
 
+    /// <summary>
+    /// Claims the idempotency key before any gateway is contacted. The row is inserted in
+    /// this state, so a second request carrying the same key finds it instead of charging again.
+    /// </summary>
+    public void BeginProcessing()
+    {
+        if (Status != PaymentStatus.Pending)
+            throw new InvalidStateTransitionException(Status, PaymentStatus.Processing);
+
+        Status = PaymentStatus.Processing;
+        Touch();
+    }
+
     public void RecordAttempt(PaymentAttempt attempt)
     {
         Attempts.Add(attempt);
-        UpdatedAt = DateTime.UtcNow;
+        Touch();
     }
 
     public void AddFraudFlag(FraudFlag flag)
     {
         FraudFlags.Add(flag);
-        UpdatedAt = DateTime.UtcNow;
+        Touch();
     }
 
     public void Authorize()
     {
-        if (Status != PaymentStatus.Pending)
+        // Reconciliation resolves an unknown outcome into the same settled states,
+        // so it is a legal starting point as well as Processing.
+        if (Status is not (PaymentStatus.Processing or PaymentStatus.RequiresReconciliation))
             throw new InvalidStateTransitionException(Status, PaymentStatus.Authorized);
 
         Status = PaymentStatus.Authorized;
-        UpdatedAt = DateTime.UtcNow;
+        Touch();
     }
- 
+
     public void Capture()
     {
         if (Status != PaymentStatus.Authorized)
             throw new InvalidStateTransitionException(Status, PaymentStatus.Captured);
 
         Status = PaymentStatus.Captured;
-        UpdatedAt = DateTime.UtcNow;
+        Touch();
     }
-    
+
     public void Decline()
     {
-        if (Status != PaymentStatus.Pending)
+        if (Status is not (PaymentStatus.Processing or PaymentStatus.RequiresReconciliation))
             throw new InvalidStateTransitionException(Status, PaymentStatus.Declined);
 
         Status = PaymentStatus.Declined;
-        UpdatedAt = DateTime.UtcNow;
+        Touch();
     }
 
     public void RejectAsFraud()
     {
-        if (Status != PaymentStatus.Pending)
+        if (Status != PaymentStatus.Processing)
             throw new InvalidStateTransitionException(Status, PaymentStatus.FraudRejected);
 
         Status = PaymentStatus.FraudRejected;
-        UpdatedAt = DateTime.UtcNow;
+        Touch();
     }
 
+    /// <summary>
+    /// A gateway stopped answering mid-charge. The payment stays unsettled until the
+    /// provider is queried, and no other gateway may be tried in the meantime.
+    /// </summary>
+    public void MarkForReconciliation()
+    {
+        if (Status != PaymentStatus.Processing)
+            throw new InvalidStateTransitionException(Status, PaymentStatus.RequiresReconciliation);
+
+        Status = PaymentStatus.RequiresReconciliation;
+        Touch();
+    }
+
+    private void Touch()
+    {
+        UpdatedAt = DateTime.UtcNow;
+        ConcurrencyStamp = Guid.NewGuid();
+    }
 }

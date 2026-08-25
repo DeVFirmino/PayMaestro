@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using PayMaestro.Application.Communication;
 using PayMaestro.Application.Options;
 using PayMaestro.Domain.Entities;
+using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
 using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
@@ -12,7 +13,9 @@ namespace PayMaestro.Application.Services;
 
 /// <summary>
 /// Coordinates the full payment flow, in order:
-/// idempotency replay -> fraud screening -> gateway routing -> cascade -> persistence.
+/// idempotency replay -> key reservation -> fraud screening -> gateway routing -> cascade -> persistence.
+/// The reservation is committed <em>before</em> any gateway is contacted: a duplicate request
+/// then loses the insert race while the money movement is still ahead of it, not behind it.
 /// </summary>
 public class PaymentOrchestrator(
     IPaymentReadOnlyRepository readRepo,
@@ -23,49 +26,58 @@ public class PaymentOrchestrator(
     IOptions<GatewayRoutingOptions> routingOptions,
     CascadeExecutor cascade)
 {
-    public async Task<ResponsePaymentJson> CreatePayment(string idempotencyKey, RequestCreatePaymentJson request)
+    public async Task<ResponsePaymentJson> CreatePayment(
+        string idempotencyKey, RequestCreatePaymentJson request, CancellationToken ct = default)
     {
         var existing = await readRepo.GetByIdempotencyKey(idempotencyKey);
         if (existing is not null)
-            return ReplayExisting(existing, request);
+            return HandleExisting(existing, request);
 
         var payment = CreatePaymentFrom(idempotencyKey, request);
+        payment.BeginProcessing();
+
+        try
+        {
+            await writeRepo.Add(payment);
+            await unitOfWork.Commit();       // claims the key; no gateway has been contacted yet
+        }
+        catch (UniqueConstraintViolationException)
+        {
+            // A concurrent request claimed the key first. It owns the charge, and this request
+            // has not called a gateway, so there is nothing to undo — report the winner's state.
+            var winner = await readRepo.GetByIdempotencyKey(idempotencyKey);
+            if (winner is null) throw;
+            return HandleExisting(winner, request);
+        }
 
         if (await ScreenForFraud(payment))
             payment.RejectAsFraud();         // no gateway is ever contacted
         else
-            await cascade.ExecuteAsync(payment, ResolveRoute(payment));
+            await cascade.ExecuteAsync(payment, ResolveRoute(payment), ct);
 
-        try
-        {
-            await writeRepo.Add(payment);    // fraud-rejected payments are stored too (audit trail)
-            await unitOfWork.Commit();
-        }
-        catch (UniqueConstraintViolationException)
-        {
-            // A concurrent request persisted this key first. Both requests may
-            // already have reached a gateway; the unique index prevents only a
-            // second payment row, not a duplicate external side effect.
-            var winner = await readRepo.GetByIdempotencyKey(idempotencyKey);
-            if (winner is null) throw;
-            return ReplayExisting(winner, request);
-        }
+        await unitOfWork.Commit();           // guarded by the payment's concurrency stamp
 
-        return ToResponse(payment);
+        return payment.ToResponse();
     }
 
     public async Task<ResponsePaymentJson?> GetById(Guid id)
     {
         var payment = await readRepo.GetById(id);
-        return payment is null ? null : ToResponse(payment);
+        return payment?.ToResponse();
     }
 
-    private ResponsePaymentJson ReplayExisting(Payment existing, RequestCreatePaymentJson request)
+    private static ResponsePaymentJson HandleExisting(Payment existing, RequestCreatePaymentJson request)
     {
         if (existing.Amount != request.Amount || existing.MerchantReference != request.MerchantReference)
             throw new IdempotencyKeyReuseException(existing.IdempotencyKey);
 
-        return ToResponse(existing);         // completed replay skips gateway execution
+        // Processing means another request is mid-charge: answering it with a fresh gateway call
+        // is precisely the double charge this flow exists to prevent.
+        if (existing.Status is PaymentStatus.Processing)
+            throw new PaymentInProgressException(existing.IdempotencyKey);
+
+        // Settled — or waiting for reconciliation, which the caller can see in the status.
+        return existing.ToResponse();
     }
 
     /// <summary>Runs every registered fraud rule; each hit is recorded as a FraudFlag.</summary>
@@ -103,12 +115,4 @@ public class PaymentOrchestrator(
             .Select(cfg => gateways.FirstOrDefault(g => g.Name == cfg.Name))
             .OfType<IPaymentGateway>()
             .ToList();
-
-    private static ResponsePaymentJson ToResponse(Payment p) => new(
-        p.Id, p.MerchantReference, p.Amount, p.Currency, p.CardLast4,
-        p.Status.ToString(), p.CreatedAt,
-        p.Attempts.OrderBy(a => a.AttemptOrder)
-            .Select(a => new ResponseAttemptJson(a.GatewayName, a.AttemptOrder,
-                a.ResultType.ToString(), a.GatewayResponseCode, a.DurationMs))
-            .ToList());
 }

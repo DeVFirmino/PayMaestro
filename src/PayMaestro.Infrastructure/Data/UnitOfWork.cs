@@ -13,6 +13,11 @@ public class UnitOfWork(PayMaestroDbContext context) : IUnitOfWork
         {
             await context.SaveChangesAsync();
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The payment's concurrency stamp moved: another writer settled it first.
+            throw new ConcurrentPaymentModificationException();
+        }
         catch (DbUpdateException e) when (IsUniqueConstraintViolation(e))
         {
             // Lets callers detect races on unique keys (e.g. two concurrent

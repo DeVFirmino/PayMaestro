@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayMaestro.Infrastructure.Data;
 
@@ -10,9 +11,11 @@ using PayMaestro.Infrastructure.Data;
 namespace PayMaestro.Infrastructure.Migrations
 {
     [DbContext(typeof(PayMaestroDbContext))]
-    partial class PayMaestroDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260825173633_AddIdempotencyReservationAndReconciliation")]
+    partial class AddIdempotencyReservationAndReconciliation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");

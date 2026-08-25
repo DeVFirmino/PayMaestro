@@ -11,9 +11,23 @@ public class PaymentTests
         => Assert.Equal(PaymentStatus.Pending, NewPayment().Status);
 
     [Fact]
-    public void Authorize_then_capture_is_the_happy_path()
+    public void Reserving_the_key_moves_the_payment_to_processing()
     {
         var payment = NewPayment();
+
+        payment.BeginProcessing();
+
+        Assert.Equal(PaymentStatus.Processing, payment.Status);
+    }
+
+    [Fact]
+    public void A_payment_cannot_be_authorized_before_its_key_is_reserved()
+        => Assert.Throws<InvalidStateTransitionException>(NewPayment().Authorize);
+
+    [Fact]
+    public void Authorize_then_capture_is_the_happy_path()
+    {
+        var payment = ReservedPayment();
 
         payment.Authorize();
         payment.Capture();
@@ -23,12 +37,12 @@ public class PaymentTests
 
     [Fact]
     public void Capture_without_authorization_is_rejected()
-        => Assert.Throws<InvalidStateTransitionException>(() => NewPayment().Capture());
+        => Assert.Throws<InvalidStateTransitionException>(ReservedPayment().Capture);
 
     [Fact]
     public void Captured_payment_cannot_be_declined()
     {
-        var payment = NewPayment();
+        var payment = ReservedPayment();
         payment.Authorize();
         payment.Capture();
 
@@ -36,9 +50,45 @@ public class PaymentTests
     }
 
     [Fact]
+    public void An_unknown_outcome_can_be_settled_either_way_once_the_provider_answers()
+    {
+        var captured = ReservedPayment();
+        captured.MarkForReconciliation();
+        captured.Authorize();
+        captured.Capture();
+
+        var declined = ReservedPayment();
+        declined.MarkForReconciliation();
+        declined.Decline();
+
+        Assert.Equal(PaymentStatus.Captured, captured.Status);
+        Assert.Equal(PaymentStatus.Declined, declined.Status);
+    }
+
+    [Fact]
+    public void A_settled_payment_cannot_be_sent_back_for_reconciliation()
+    {
+        var payment = ReservedPayment();
+        payment.Decline();
+
+        Assert.Throws<InvalidStateTransitionException>(payment.MarkForReconciliation);
+    }
+
+    [Fact]
+    public void Every_transition_moves_the_concurrency_stamp()
+    {
+        var payment = ReservedPayment();
+        var beforeAuthorize = payment.ConcurrencyStamp;
+
+        payment.Authorize();
+
+        Assert.NotEqual(beforeAuthorize, payment.ConcurrencyStamp);
+    }
+
+    [Fact]
     public void Fraud_rejection_records_the_triggered_rule()
     {
-        var payment = NewPayment();
+        var payment = ReservedPayment();
 
         payment.AddFraudFlag(FraudFlag.Create(payment.Id, "DeclineVelocity", "3 declines in 24h"));
         payment.RejectAsFraud();
@@ -53,10 +103,17 @@ public class PaymentTests
     [InlineData(-10)]
     public void Amount_must_be_positive(decimal amount)
         => Assert.Throws<ArgumentException>(() => Payment.Create(
-            "key", "ref", "cust", amount, "EUR", "411111", "9999", "MT", "203.0.113.10", "MT"));
+            "key", "ref", "cust", amount, "EUR", "411111", "7777", "MT", "203.0.113.10", "MT"));
 
     private static Payment NewPayment() => Payment.Create(
         idempotencyKey: "key-1", merchantReference: "ORDER-1", customerId: "cust-1",
-        amount: 100m, currency: "EUR", cardBin: "411111", cardLast4: "9999",
+        amount: 100m, currency: "EUR", cardBin: "411111", cardLast4: "7777",
         cardCountry: "MT", customerIp: "203.0.113.10", ipCountry: "MT");
+
+    private static Payment ReservedPayment()
+    {
+        var payment = NewPayment();
+        payment.BeginProcessing();
+        return payment;
+    }
 }
