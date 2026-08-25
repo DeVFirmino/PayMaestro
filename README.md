@@ -13,13 +13,13 @@ Payment orchestration is the layer *above* payment gateways: the merchant integr
 
 ## The pipeline
 
-`request → completed-outcome replay → fraud screening → route selection → decline-aware gateway cascade → persistence`
+`request → completed-outcome replay → key reservation → fraud screening → route selection → decline-aware gateway cascade → persistence`
 
-The replay step skips gateway work when the key already has a stored result. A concurrent first use is a different problem: this study implementation contacts its mock gateway before it reserves the key, so a real integration would need an earlier in-progress reservation plus the provider's idempotency and reconciliation mechanisms.
+The reservation is committed **before** any gateway is contacted, so a duplicate request meets the key while the money movement is still ahead of it: a settled key replays its stored outcome, and a key still in flight is answered with `409` instead of a second charge.
 
 ## Payment lifecycle
 
-Transitions are guarded **inside the aggregate** — an invalid transition throws a domain exception. There is no path back from `Captured`, and refunds only exist after capture (void vs refund). The lifecycle strip in the diagram above shows the full picture: `Pending → Authorized → Captured`, with `FraudRejected` and `Declined` as terminal branches (`Captured → Refunded` is roadmap).
+Transitions are guarded **inside the aggregate** — an invalid transition throws a domain exception. There is no path back from `Captured`, and refunds only exist after capture (void vs refund). The lifecycle strip in the diagram above shows the full picture: `Pending → Processing → Authorized → Captured`, with `FraudRejected` and `Declined` as terminal branches and `RequiresReconciliation` as the holding state for a charge that never answered (`Captured → Refunded` is roadmap).
 
 ## Cascading in action
 
@@ -27,7 +27,9 @@ Card ending `1111` is soft-declined by AlphaPay — a *recoverable* failure — 
 
 ## Key engineering decisions
 
-**Idempotency is modelled at two levels.** A completed key replays its stored result, and a unique database index prevents duplicate payment rows. The current flow still contacts the mock gateway before it reserves the key. Two concurrent first requests could therefore both reach a real provider before one insert loses the database race. A production integration would reserve an in-progress record first, use the provider's idempotency contract and reconcile uncertain outcomes.
+**Idempotency is reserve-first.** The payment row is inserted in `Processing` — claiming the key — before a gateway is contacted, and the unique index on that key decides the winner of a race. The loser has not charged anything yet: it either replays the winner's settled outcome or gets `409` while the winner is still in flight. Each attempt also carries a derived key (`{idempotency-key}:{gateway}:{attempt}`) so the provider's own deduplication recognises a retry. `IdempotencyReservationTests` drives two concurrent requests through a real SQLite database and asserts the gateway was charged exactly once.
+
+**An unknown outcome is not a failure.** When a gateway stops answering, the payment moves to `RequiresReconciliation` and the cascade stops — charging the next acquirer while the first may hold the money is how a customer gets billed twice. `POST /api/payments/{id}/reconcile` asks the provider what happened to the key that attempt already used, and settles the payment from the answer instead of charging again.
 
 **Hard vs soft declines drive the cascade policy.** Soft declines (insufficient funds, timeouts) and gateway errors cascade to the next route; hard declines (stolen or blocked cards) stop everything immediately.
 
@@ -79,7 +81,7 @@ dotnet run --project src/PayMaestro.API
 | `3333` | Gateway error on GammaPay |
 | anything else | Approved on the first eligible gateway |
 
-Also try: an amount above 5000 EUR (skips AlphaPay's cap — routing in action), a currency no gateway supports (declined with zero attempts), the same `Idempotency-Key` again after completion (identical stored response; the same key with a *different* amount returns `422`) — and the fraud rule: decline card `…0000` three times, and the **fourth** payment on that card comes back `FraudRejected` with an empty attempt list, because the velocity rule blocked it before any gateway was called.
+Also try: card `…9999`, which the mock acquirer settles and then fails to answer — the payment comes back `RequiresReconciliation` with no second gateway attempted, and `POST /api/payments/{id}/reconcile` turns it into `Captured` without another charge. Then: an amount above 5000 EUR (skips AlphaPay's cap — routing in action), a currency no gateway supports (declined with zero attempts), the same `Idempotency-Key` again after completion (identical stored response; the same key with a *different* amount returns `422`) — and the fraud rule: decline card `…0000` three times, and the **fourth** payment on that card comes back `FraudRejected` with an empty attempt list, because the velocity rule blocked it before any gateway was called.
 
 ## What's next
 

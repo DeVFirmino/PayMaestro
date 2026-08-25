@@ -17,9 +17,12 @@ One API in front of many payment gateways. The merchant integrates once; PayMaes
 ### Status state machine
 
 ```
-Pending ──> FraudRejected        (a fraud rule fired; no gateway contacted)
-Pending ──> Declined             (hard decline, or all routes exhausted)
-Pending ──> Authorized ──> Captured ──> Refunded (roadmap)
+Pending ──> Processing           (the idempotency key is reserved in the database)
+Processing ──> FraudRejected     (a fraud rule fired; no gateway contacted)
+Processing ──> Declined          (hard decline, or all routes exhausted)
+Processing ──> Authorized ──> Captured ──> Refunded (roadmap)
+Processing ──> RequiresReconciliation (a gateway never answered; outcome unknown)
+RequiresReconciliation ──> Captured | Declined   (settled from the provider's own record)
 ```
 
 ## Idempotency
@@ -27,8 +30,11 @@ Pending ──> Authorized ──> Captured ──> Refunded (roadmap)
 - The client sends an `Idempotency-Key` header.
 - Same completed key + same payload → replay the stored result without another gateway call.
 - Same key + different payload → `422`.
-- The key has a **unique index in the database**. If two requests race past the application check, the database prevents a second payment row and the loser reloads the stored winner.
-- **Known boundary:** gateway execution currently happens before the first key is persisted. The unique index protects database identity, not an external side effect that already happened. A real integration should reserve an in-progress record before calling the provider, pass the provider's own idempotency key and reconcile uncertain outcomes.
+- The key has a **unique index in the database**, and the payment row is inserted in `Processing` **before any gateway call**. A request that loses that insert race has not contacted a provider yet, so it replays the winner's outcome instead of charging.
+- Same key while the first request is still in flight → `409`. The caller retries and reads the outcome; it never triggers a second charge.
+- Each attempt presents the provider a derived key, `{idempotency-key}:{gateway}:{attempt-order}`, so re-driving an attempt reaches the provider under a key it has already seen.
+- The payment carries a **concurrency stamp**; a writer working from a stale copy loses instead of overwriting a settled outcome.
+- **Remaining boundary:** the gateways are in-process mocks. They implement the provider side of the contract (a settled key returns its stored outcome, and can be queried), but this is not evidence against a real acquirer's API.
 
 ## Routing
 
@@ -42,6 +48,7 @@ Configuration-driven (`appsettings.json`): each gateway declares supported curre
 | `SoftDecline` | Recoverable (insufficient funds…) | Try next gateway |
 | `Error` | Gateway problem, not card problem | Try next gateway |
 | `HardDecline` | Fraud signal (stolen/blocked card) | **Stop immediately** — never shop a bad card to another acquirer |
+| `Uncertain` | No answer (timeout, dropped connection) | **Stop immediately** and hold for reconciliation — the provider may already hold the money |
 
 ## Fraud screening
 
@@ -64,8 +71,12 @@ Every attempt and every fraud flag is persisted; deletes are restricted at the d
 | Invalid fields / missing idempotency header | 400 |
 | Key reused with different payload | 422 |
 | Illegal state transition | 409 |
+| Same key still being processed | 409 |
+| Payment settled by a concurrent writer | 409 |
+| Payment not found (reconcile / get) | 404 |
+| Gateway of a recorded attempt no longer registered | 503 |
 | Unexpected | 500, generic message |
 
 ## Deliberate simplifications
 
-In-process simulated gateways; stubbed card/IP countries; SQLite + `EnsureCreated` instead of migrations; auto-capture immediately after authorization.
+In-process simulated gateways; stubbed card/IP countries; SQLite, with `EnsureCreated` on startup for the demo while migrations carry the schema; auto-capture immediately after authorization; reconciliation is triggered by an endpoint rather than a background sweeper, so a process that dies mid-charge leaves a `Processing` row for an operator to reconcile.
