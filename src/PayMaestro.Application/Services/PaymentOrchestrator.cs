@@ -43,8 +43,9 @@ public class PaymentOrchestrator(
         }
         catch (UniqueConstraintViolationException)
         {
-            // A concurrent request with the same idempotency key won the race:
-            // the unique index serialized us, so replay the winner's outcome.
+            // A concurrent request persisted this key first. Both requests may
+            // already have reached a gateway; the unique index prevents only a
+            // second payment row, not a duplicate external side effect.
             var winner = await readRepo.GetByIdempotencyKey(idempotencyKey);
             if (winner is null) throw;
             return ReplayExisting(winner, request);
@@ -64,7 +65,7 @@ public class PaymentOrchestrator(
         if (existing.Amount != request.Amount || existing.MerchantReference != request.MerchantReference)
             throw new IdempotencyKeyReuseException(existing.IdempotencyKey);
 
-        return ToResponse(existing);         // replay: no double charge
+        return ToResponse(existing);         // completed replay skips gateway execution
     }
 
     /// <summary>Runs every registered fraud rule; each hit is recorded as a FraudFlag.</summary>

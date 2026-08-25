@@ -25,9 +25,10 @@ Pending ──> Authorized ──> Captured ──> Refunded (roadmap)
 ## Idempotency
 
 - The client sends an `Idempotency-Key` header.
-- Same key + same payload → replay the stored result, never charge twice.
+- Same completed key + same payload → replay the stored result without another gateway call.
 - Same key + different payload → `422`.
-- The key has a **unique index in the database**. If two requests with the same key race past the application check, the database rejects the second insert; we catch that and replay the winner's stored outcome. The database is the referee, not the C# code.
+- The key has a **unique index in the database**. If two requests race past the application check, the database prevents a second payment row and the loser reloads the stored winner.
+- **Known boundary:** gateway execution currently happens before the first key is persisted. The unique index protects database identity, not an external side effect that already happened. A real integration should reserve an in-progress record before calling the provider, pass the provider's own idempotency key and reconcile uncertain outcomes.
 
 ## Routing
 

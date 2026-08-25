@@ -11,8 +11,8 @@ public class PaymentsController(PaymentOrchestrator orchestrator) : ControllerBa
 {
     /// <summary>Creates and processes a payment.</summary>
     /// <remarks>
-    /// Requires an <c>Idempotency-Key</c> header. Sending the same key again
-    /// replays the original result instead of charging the customer twice.
+    /// Requires an <c>Idempotency-Key</c> header. Sending a completed key again
+    /// replays the stored result without another gateway call.
     /// </remarks>
     /// <response code="200">Payment processed; the body contains the final status and every gateway attempt.</response>
     /// <response code="400">Missing or invalid request fields, or missing Idempotency-Key header.</response>
