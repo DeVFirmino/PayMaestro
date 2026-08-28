@@ -5,20 +5,27 @@ using PayMaestro.Domain.Repositories;
 
 namespace PayMaestro.Infrastructure.Data;
 
-public class UnitOfWork(PayMaestroDbContext context) : IUnitOfWork
+public sealed class UnitOfWork : IUnitOfWork
 {
-    public async Task Commit()
+    private readonly PayMaestroDbContext _context;
+
+    public UnitOfWork(PayMaestroDbContext context)
+    {
+        _context = context;
+    }
+
+    public async Task CommitAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
             // The payment's concurrency stamp moved: another writer settled it first.
             throw new ConcurrentPaymentModificationException();
         }
-        catch (DbUpdateException e) when (IsUniqueConstraintViolation(e))
+        catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
         {
             // Lets callers detect races on unique keys (e.g. two concurrent
             // requests with the same idempotency key) without referencing EF.
@@ -26,6 +33,6 @@ public class UnitOfWork(PayMaestroDbContext context) : IUnitOfWork
         }
     }
 
-    private static bool IsUniqueConstraintViolation(DbUpdateException e)
-        => e.InnerException is SqliteException { SqliteErrorCode: 19 };   // SQLITE_CONSTRAINT
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception)
+        => exception.InnerException is SqliteException { SqliteErrorCode: 19 }; // SQLITE_CONSTRAINT
 }

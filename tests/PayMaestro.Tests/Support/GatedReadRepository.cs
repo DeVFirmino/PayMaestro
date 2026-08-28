@@ -15,9 +15,9 @@ public sealed class GatedReadRepository(
 {
     private bool _held;
 
-    public async Task<Payment?> GetByIdempotencyKey(string idempotencyKey)
+    public async Task<Payment?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken)
     {
-        var result = await inner.GetByIdempotencyKey(idempotencyKey);
+        Payment? result = await inner.GetByIdempotencyKeyAsync(idempotencyKey, cancellationToken);
 
         if (!_held)
         {
@@ -29,8 +29,13 @@ public sealed class GatedReadRepository(
         return result;
     }
 
-    public Task<Payment?> GetById(Guid id) => inner.GetById(id);
+    public Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+        => inner.GetByIdAsync(id, cancellationToken);
 
-    public Task<int> CountRecentDeclinedAttempts(string cardBin, string cardLast4, TimeSpan window)
-        => inner.CountRecentDeclinedAttempts(cardBin, cardLast4, window);
+    public Task<int> CountRecentDeclinedAttemptsAsync(
+        string cardBin,
+        string cardLast4,
+        TimeSpan window,
+        CancellationToken cancellationToken)
+        => inner.CountRecentDeclinedAttemptsAsync(cardBin, cardLast4, window, cancellationToken);
 }

@@ -1,4 +1,16 @@
+using System.Net;
+
 namespace PayMaestro.Domain.Exceptions;
 
-public class PaymentNotFoundException(Guid id)
-    : PayMaestroException($"No payment exists with id '{id}'.");
+public sealed class PaymentNotFoundException : PayMaestroException
+{
+    public PaymentNotFoundException(Guid id)
+        : base($"No payment exists with id '{id}'.")
+    {
+        PaymentId = id;
+    }
+
+    public Guid PaymentId { get; }
+
+    public override HttpStatusCode StatusCode => HttpStatusCode.NotFound;
+}

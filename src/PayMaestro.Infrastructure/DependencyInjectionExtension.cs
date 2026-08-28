@@ -14,13 +14,13 @@ public static class DependencyInjectionExtension
 {
     public static void AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddDbContext<PayMaestroDbContext>(opt =>
-            opt.UseSqlite(configuration.GetConnectionString("DefaultConnection")
+        services.AddDbContext<PayMaestroDbContext>(options =>
+            options.UseSqlite(configuration.GetConnectionString("DefaultConnection")
                           ?? "Data Source=paymaestro.db"));
 
         services.AddScoped<IPaymentReadOnlyRepository, PaymentRepository>();
-        services.AddScoped<IPaymentWriteOnlyRepository, PaymentRepository>();
         services.AddScoped<IPaymentUpdateOnlyRepository, PaymentRepository>();
+        services.AddScoped<IPaymentWriteOnlyRepository, PaymentRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 
         // The mock acquirers share one ledger so a key they already settled is recognised
