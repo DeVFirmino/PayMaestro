@@ -2,5 +2,5 @@ namespace PayMaestro.Domain.Repositories;
 
 public interface IUnitOfWork
 {
-    Task Commit();
+    public Task CommitAsync(CancellationToken cancellationToken);
 }

@@ -20,7 +20,7 @@ public class ReconciliationTests
 
         using var context = db.NewContext();
         var response = await db.NewOrchestrator(context, gateways: [silent, next])
-            .CreatePayment("key-1", PaymentDatabase.Request());
+            .Execute("key-1", PaymentDatabase.Request());
 
         Assert.Equal(nameof(PaymentStatus.RequiresReconciliation), response.Status);
         Assert.Equal(1, silent.Charges);
@@ -35,10 +35,10 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var pending = await db.NewOrchestrator(chargeContext, gateways: [silent])
-            .CreatePayment("key-1", PaymentDatabase.Request());
+            .Execute("key-1", PaymentDatabase.Request());
 
         using var reconcileContext = db.NewContext();
-        var settled = await db.NewReconciler(reconcileContext, silent).Reconcile(pending.Id);
+        var settled = await db.NewReconciler(reconcileContext, silent).Execute(pending.Id);
 
         Assert.Equal(nameof(PaymentStatus.Captured), settled.Status);
         Assert.Equal(1, silent.Charges);    // the query asked, it did not pay
@@ -52,13 +52,13 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var pending = await db.NewOrchestrator(chargeContext, gateways: [silent])
-            .CreatePayment("key-1", PaymentDatabase.Request());
+            .Execute("key-1", PaymentDatabase.Request());
 
         // A provider with no memory of the attempt: nothing was charged.
         var forgetful = new TestGateway("Alpha");
 
         using var reconcileContext = db.NewContext();
-        var settled = await db.NewReconciler(reconcileContext, forgetful).Reconcile(pending.Id);
+        var settled = await db.NewReconciler(reconcileContext, forgetful).Execute(pending.Id);
 
         Assert.Equal(nameof(PaymentStatus.Declined), settled.Status);
         Assert.Equal(0, forgetful.Charges);
@@ -72,7 +72,7 @@ public class ReconciliationTests
 
         using var context = db.NewContext();
         var pending = await db.NewOrchestrator(context, gateways: [silent])
-            .CreatePayment("key-1", PaymentDatabase.Request());
+            .Execute("key-1", PaymentDatabase.Request());
 
         using var verification = db.NewContext();
         var attempt = await verification.PaymentAttempt.SingleAsync(a => a.PaymentId == pending.Id);
@@ -89,7 +89,7 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var pending = await db.NewOrchestrator(chargeContext, gateways: [silent])
-            .CreatePayment("key-1", PaymentDatabase.Request());
+            .Execute("key-1", PaymentDatabase.Request());
 
         using var firstContext = db.NewContext();
         using var secondContext = db.NewContext();
@@ -98,10 +98,10 @@ public class ReconciliationTests
         // writes, the first has already settled it and the stamp it loaded is stale.
         await secondContext.Payment.Include(p => p.Attempts).FirstAsync(p => p.Id == pending.Id);
 
-        await db.NewReconciler(firstContext, silent).Reconcile(pending.Id);
+        await db.NewReconciler(firstContext, silent).Execute(pending.Id);
 
         await Assert.ThrowsAsync<ConcurrentPaymentModificationException>(
-            () => db.NewReconciler(secondContext, silent).Reconcile(pending.Id));
+            () => db.NewReconciler(secondContext, silent).Execute(pending.Id));
     }
 
     [Fact]
@@ -112,10 +112,10 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var captured = await db.NewOrchestrator(chargeContext, gateways: [gateway])
-            .CreatePayment("key-1", PaymentDatabase.Request());
+            .Execute("key-1", PaymentDatabase.Request());
 
         using var reconcileContext = db.NewContext();
-        var reconciled = await db.NewReconciler(reconcileContext, gateway).Reconcile(captured.Id);
+        var reconciled = await db.NewReconciler(reconcileContext, gateway).Execute(captured.Id);
 
         Assert.Equal(nameof(PaymentStatus.Captured), reconciled.Status);
         Assert.Equal(1, gateway.Charges);
@@ -128,6 +128,6 @@ public class ReconciliationTests
 
         using var context = db.NewContext();
         await Assert.ThrowsAsync<PaymentNotFoundException>(
-            () => db.NewReconciler(context, new TestGateway("Alpha")).Reconcile(Guid.NewGuid()));
+            () => db.NewReconciler(context, new TestGateway("Alpha")).Execute(Guid.NewGuid()));
     }
 }

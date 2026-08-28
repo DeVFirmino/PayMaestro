@@ -1,15 +1,16 @@
 using Microsoft.OpenApi;
 using PayMaestro.API.Filters;
-using PayMaestro.Application.Fraud;
+using PayMaestro.Application;
 using PayMaestro.Application.Options;
-using PayMaestro.Application.Services;
-using PayMaestro.Domain.Fraud;
 using PayMaestro.Infrastructure;
 using PayMaestro.Infrastructure.Data;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers(options => options.Filters.Add<ExceptionFilter>());
+builder.Services.AddControllers(options => options.Filters.Add<ExceptionFilter>())
+    // An empty status result must reach the client as-is: GET of an unknown payment answers
+    // 404 with an empty body, not a synthesized ProblemDetails envelope.
+    .ConfigureApiBehaviorOptions(options => options.SuppressMapClientErrors = true);
 builder.Services.Configure<GatewayRoutingOptions>(builder.Configuration.GetSection("GatewayRouting"));
 
 builder.Services.AddSwaggerGen(options =>
@@ -26,18 +27,15 @@ builder.Services.AddSwaggerGen(options =>
     options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, "PayMaestro.API.xml"));
 });
 
+builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddScoped<PaymentOrchestrator>();
-builder.Services.AddScoped<PaymentReconciler>();
-builder.Services.AddScoped<CascadeExecutor>();
-builder.Services.AddScoped<IFraudRule, DeclineVelocityRule>();
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+using (IServiceScope scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<PayMaestroDbContext>();
-    db.Database.EnsureCreated();     // demo-friendly; migrations in production
+    PayMaestroDbContext db = scope.ServiceProvider.GetRequiredService<PayMaestroDbContext>();
+    db.Database.EnsureCreated(); // demo-friendly; migrations in production
 }
 
 app.UseSwagger();
@@ -45,6 +43,7 @@ app.UseSwaggerUI(options =>
     options.SwaggerEndpoint("/swagger/v1/swagger.json", "PayMaestro API v1"));
 
 app.MapControllers();
-app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();
+
+public partial class Program { } // exposes the entry point to WebApplicationFactory in the tests

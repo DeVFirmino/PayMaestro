@@ -4,8 +4,13 @@ using PayMaestro.Domain.Gateways;
 
 namespace PayMaestro.Infrastructure.PaymentGateways;
 
-public class BetaPayGateway(MockProviderLedger ledger) : MockGateway(ledger)
+public sealed class BetaPayGateway : MockGateway
 {
+    public BetaPayGateway(MockProviderLedger ledger)
+        : base(ledger)
+    {
+    }
+
     public override string Name => "BetaPay";
 
     protected override TimeSpan Latency => TimeSpan.FromMilliseconds(200);

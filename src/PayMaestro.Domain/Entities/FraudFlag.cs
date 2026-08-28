@@ -1,6 +1,6 @@
 namespace PayMaestro.Domain.Entities;
 
-public class FraudFlag : EntityBase
+public sealed class FraudFlag : EntityBase
 {
     public Guid PaymentId { get; private set; }
     public string RuleName { get; private set; } = null!;

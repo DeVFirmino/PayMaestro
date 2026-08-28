@@ -4,5 +4,5 @@ namespace PayMaestro.Domain.Repositories.PaymentRepository;
 
 public interface IPaymentWriteOnlyRepository
 {
-    Task Add(Payment payment);
+    public Task AddAsync(Payment payment, CancellationToken cancellationToken);
 }
