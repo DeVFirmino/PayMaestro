@@ -98,7 +98,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
 
     private static PaymentResponse HandleExisting(Payment existing, CreatePaymentRequest request)
     {
-        if (existing.Amount != request.Amount || existing.MerchantReference != request.MerchantReference)
+        if (PayloadDiffers(existing, request))
         {
             throw new IdempotencyKeyReuseException(existing.IdempotencyKey);
         }
@@ -113,6 +113,20 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         // Settled — or waiting for reconciliation, which the caller can see in the status.
         return existing.ToResponse();
     }
+
+    /// <summary>
+    /// A key only replays the outcome of the exact request that reserved it. Any change to what
+    /// would be charged — amount, currency, card, customer — is a different payment wearing an
+    /// old key, and must be refused rather than answered with the stored outcome.
+    /// </summary>
+    private static bool PayloadDiffers(Payment existing, CreatePaymentRequest request)
+        => existing.Amount != request.Amount
+        || existing.MerchantReference != request.MerchantReference
+        || existing.CustomerId != request.CustomerId
+        || existing.Currency != request.Currency.ToUpperInvariant()
+        || existing.CardBin != request.CardNumber[..6]
+        || existing.CardLast4 != request.CardNumber[^4..]
+        || existing.CustomerIp != request.CustomerIp;
 
     /// <summary>Runs every registered fraud rule; each hit is recorded as a FraudFlag.</summary>
     private async Task<bool> ScreenForFraud(Payment payment, CancellationToken cancellationToken)
