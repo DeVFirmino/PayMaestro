@@ -14,15 +14,18 @@ namespace PayMaestro.Application.Services;
 /// first may have taken the money is exactly how a customer gets billed twice.
 /// Every attempt is recorded on the payment for auditing.
 /// </summary>
-public class CascadeExecutor
+public sealed class CascadeExecutor
 {
-    public async Task ExecuteAsync(Payment payment, IReadOnlyList<IPaymentGateway> route, CancellationToken ct = default)
+    public async Task ExecuteAsync(
+        Payment payment,
+        IReadOnlyList<IPaymentGateway> route,
+        CancellationToken cancellationToken = default)
     {
-        var order = 1;
+        int order = 1;
 
-        foreach (var gateway in route)
+        foreach (IPaymentGateway gateway in route)
         {
-            var result = await TryGateway(payment, gateway, order++, ct);
+            GatewayResult result = await TryGateway(payment, gateway, order++, cancellationToken);
 
             switch (result.ResultType)
             {
@@ -40,25 +43,25 @@ public class CascadeExecutor
                     return;
 
                 default:
-                    continue;   // SoftDecline / Error: the provider did not take the money
+                    continue; // SoftDecline / Error: the provider did not take the money
             }
         }
 
-        payment.Decline();       // routes exhausted
+        payment.Decline(); // routes exhausted
     }
 
     private static async Task<GatewayResult> TryGateway(
-        Payment payment, IPaymentGateway gateway, int order, CancellationToken ct)
+        Payment payment, IPaymentGateway gateway, int order, CancellationToken cancellationToken)
     {
-        var providerKey = ProviderIdempotencyKey.For(payment, gateway.Name, order);
-        var start = Stopwatch.GetTimestamp();
+        string providerKey = ProviderIdempotencyKey.For(payment, gateway.Name, order);
+        long start = Stopwatch.GetTimestamp();
 
         GatewayResult result;
         try
         {
-            result = await gateway.ProcessAsync(payment, providerKey, ct);
+            result = await gateway.ProcessAsync(payment, providerKey, cancellationToken);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested is false)
         {
             // The call failed without an answer. Whether the provider charged is unknown,
             // so it is recorded as such instead of being treated as a clean failure.

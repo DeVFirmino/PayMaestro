@@ -4,8 +4,13 @@ using PayMaestro.Domain.Gateways;
 
 namespace PayMaestro.Infrastructure.PaymentGateways;
 
-public class GammaPayGateway(MockProviderLedger ledger) : MockGateway(ledger)
+public sealed class GammaPayGateway : MockGateway
 {
+    public GammaPayGateway(MockProviderLedger ledger)
+        : base(ledger)
+    {
+    }
+
     public override string Name => "GammaPay";
 
     protected override TimeSpan Latency => TimeSpan.FromMilliseconds(100);

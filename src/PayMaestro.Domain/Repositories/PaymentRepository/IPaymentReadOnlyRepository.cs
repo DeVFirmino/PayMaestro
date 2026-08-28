@@ -4,7 +4,13 @@ namespace PayMaestro.Domain.Repositories.PaymentRepository;
 
 public interface IPaymentReadOnlyRepository
 {
-    Task<Payment?> GetByIdempotencyKey(string idempotencyKey);
-    Task<Payment?> GetById(Guid id);
-    Task<int> CountRecentDeclinedAttempts(string cardBin, string cardLast4, TimeSpan window);
+    public Task<Payment?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken);
+
+    public Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
+
+    public Task<int> CountRecentDeclinedAttemptsAsync(
+        string cardBin,
+        string cardLast4,
+        TimeSpan window,
+        CancellationToken cancellationToken);
 }

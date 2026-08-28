@@ -3,7 +3,7 @@ using PayMaestro.Domain.Exceptions;
 
 namespace PayMaestro.Domain.Entities;
 
-public class Payment : EntityBase
+public sealed class Payment : EntityBase
 {
     public string IdempotencyKey { get; private set; } = null!;
     public string MerchantReference { get; private set; } = null!;
@@ -38,13 +38,19 @@ public class Payment : EntityBase
         string cardLast4, string cardCountry, string customerIp, string ipCountry)
     {
         if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
             throw new ArgumentException("Idempotency key is required.", nameof(idempotencyKey));
+        }
 
         if (amount <= 0)
+        {
             throw new ArgumentException("Amount must be greater than zero.", nameof(amount));
+        }
 
         if (string.IsNullOrWhiteSpace(currency) || currency.Length != 3)
+        {
             throw new ArgumentException("Currency must be a 3-letter ISO code.", nameof(currency));
+        }
 
         return new Payment
         {
@@ -69,8 +75,10 @@ public class Payment : EntityBase
     /// </summary>
     public void BeginProcessing()
     {
-        if (Status != PaymentStatus.Pending)
+        if (Status is not PaymentStatus.Pending)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Processing);
+        }
 
         Status = PaymentStatus.Processing;
         Touch();
@@ -93,7 +101,9 @@ public class Payment : EntityBase
         // Reconciliation resolves an unknown outcome into the same settled states,
         // so it is a legal starting point as well as Processing.
         if (Status is not (PaymentStatus.Processing or PaymentStatus.RequiresReconciliation))
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Authorized);
+        }
 
         Status = PaymentStatus.Authorized;
         Touch();
@@ -101,8 +111,10 @@ public class Payment : EntityBase
 
     public void Capture()
     {
-        if (Status != PaymentStatus.Authorized)
+        if (Status is not PaymentStatus.Authorized)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Captured);
+        }
 
         Status = PaymentStatus.Captured;
         Touch();
@@ -111,7 +123,9 @@ public class Payment : EntityBase
     public void Decline()
     {
         if (Status is not (PaymentStatus.Processing or PaymentStatus.RequiresReconciliation))
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Declined);
+        }
 
         Status = PaymentStatus.Declined;
         Touch();
@@ -119,8 +133,10 @@ public class Payment : EntityBase
 
     public void RejectAsFraud()
     {
-        if (Status != PaymentStatus.Processing)
+        if (Status is not PaymentStatus.Processing)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.FraudRejected);
+        }
 
         Status = PaymentStatus.FraudRejected;
         Touch();
@@ -132,8 +148,10 @@ public class Payment : EntityBase
     /// </summary>
     public void MarkForReconciliation()
     {
-        if (Status != PaymentStatus.Processing)
+        if (Status is not PaymentStatus.Processing)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.RequiresReconciliation);
+        }
 
         Status = PaymentStatus.RequiresReconciliation;
         Touch();

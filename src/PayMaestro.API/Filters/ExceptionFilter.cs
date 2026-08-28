@@ -1,29 +1,55 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using PayMaestro.Application.Communication;
+using PayMaestro.Application.Contracts;
 using PayMaestro.Domain.Exceptions;
 
 namespace PayMaestro.API.Filters;
 
-public class ExceptionFilter : IExceptionFilter
+public sealed class ExceptionFilter : IExceptionFilter
 {
+    private readonly ILogger<ExceptionFilter> _logger;
+
+    public ExceptionFilter(ILogger<ExceptionFilter> logger)
+    {
+        _logger = logger;
+    }
+
     public void OnException(ExceptionContext context)
     {
-        context.Result = context.Exception switch
+        if (context.Exception is PayMaestroException known)
         {
-            PaymentNotFoundException e => new NotFoundObjectResult(new ResponseErrorJson(e.Message)),
-            IdempotencyKeyReuseException e => new UnprocessableEntityObjectResult(new ResponseErrorJson(e.Message)),
+            _logger.LogWarning(known, "Handled failure on {Path}", context.HttpContext.Request.Path);
 
-            // Both mean "someone else is already handling this payment" — the caller retries
-            // and reads the outcome instead of triggering a second charge.
-            PaymentInProgressException e => new ConflictObjectResult(new ResponseErrorJson(e.Message)),
-            ConcurrentPaymentModificationException e => new ConflictObjectResult(new ResponseErrorJson(e.Message)),
+            int statusCode = (int)known.StatusCode;
+            context.HttpContext.Response.StatusCode = statusCode;
+            context.Result = new ObjectResult(new ErrorResponse { Error = known.Message })
+            {
+                StatusCode = statusCode
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
 
-            InvalidStateTransitionException e => new ConflictObjectResult(new ResponseErrorJson(e.Message)),
-            GatewayUnavailableException e => new ObjectResult(new ResponseErrorJson(e.Message)) { StatusCode = 503 },
-            PayMaestroException e => new BadRequestObjectResult(new ResponseErrorJson(e.Message)),
-            ArgumentException e => new BadRequestObjectResult(new ResponseErrorJson(e.Message)),
-            _ => new ObjectResult(new ResponseErrorJson("Unexpected error.")) { StatusCode = 500 }
+        if (context.Exception is ArgumentException argumentException)
+        {
+            context.HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Result = new BadRequestObjectResult(new ErrorResponse { Error = argumentException.Message });
+            context.ExceptionHandled = true;
+            return;
+        }
+
+        string correlationId = context.HttpContext.TraceIdentifier;
+
+        _logger.LogError(
+            context.Exception,
+            "Unhandled failure {CorrelationId} on {Path}",
+            correlationId,
+            context.HttpContext.Request.Path);
+
+        context.HttpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Result = new ObjectResult(new ErrorResponse { Error = "Unexpected error." })
+        {
+            StatusCode = StatusCodes.Status500InternalServerError
         };
         context.ExceptionHandled = true;
     }

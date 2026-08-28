@@ -9,6 +9,7 @@ namespace PayMaestro.Domain.Fraud;
 /// </summary>
 public interface IFraudRule
 {
-    string RuleName { get; }
-    Task<FraudVerdict> EvaluateAsync(Payment payment, CancellationToken ct = default);
+    public string RuleName { get; }
+
+    public Task<FraudVerdict> EvaluateAsync(Payment payment, CancellationToken cancellationToken = default);
 }
