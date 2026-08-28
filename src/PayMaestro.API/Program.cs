@@ -7,7 +7,10 @@ using PayMaestro.Infrastructure.Data;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers(options => options.Filters.Add<ExceptionFilter>());
+builder.Services.AddControllers(options => options.Filters.Add<ExceptionFilter>())
+    // An empty status result must reach the client as-is: GET of an unknown payment answers
+    // 404 with an empty body, not a synthesized ProblemDetails envelope.
+    .ConfigureApiBehaviorOptions(options => options.SuppressMapClientErrors = true);
 builder.Services.Configure<GatewayRoutingOptions>(builder.Configuration.GetSection("GatewayRouting"));
 
 builder.Services.AddSwaggerGen(options =>
@@ -42,3 +45,5 @@ app.UseSwaggerUI(options =>
 app.MapControllers();
 
 app.Run();
+
+public partial class Program { } // exposes the entry point to WebApplicationFactory in the tests
