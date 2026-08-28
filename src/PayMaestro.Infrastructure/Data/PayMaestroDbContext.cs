@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayMaestro.Domain.Entities;
 
 namespace PayMaestro.Infrastructure.Data;
@@ -14,6 +15,14 @@ public sealed class PayMaestroDbContext : DbContext
     public DbSet<Payment> Payment => Set<Payment>();
     public DbSet<PaymentAttempt> PaymentAttempt => Set<PaymentAttempt>();
     public DbSet<FraudFlag> FraudFlags => Set<FraudFlag>();
+
+    // Timestamps are written with DateTime.UtcNow, but SQLite hands them back with an
+    // Unspecified kind. Restamping them as UTC on the way out keeps a reloaded payment
+    // identical to the one the original request answered with — serialized without the
+    // UTC marker, the "same" timestamp reads as a different instant to the client.
+    private static readonly ValueConverter<DateTime, DateTime> UtcTimestamp = new(
+        value => value,
+        value => DateTime.SpecifyKind(value, DateTimeKind.Utc));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -37,6 +46,8 @@ public sealed class PayMaestroDbContext : DbContext
         payment.Property(entity => entity.CardBin).HasMaxLength(6);
         payment.Property(entity => entity.CardLast4).HasMaxLength(4);
         payment.Property(entity => entity.Status).HasConversion<string>();
+        payment.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);
+        payment.Property(entity => entity.UpdatedAt).HasConversion(UtcTimestamp);
 
         // Optimistic concurrency: the UPDATE carries the stamp the writer loaded, so a writer
         // working from a stale payment fails instead of overwriting a settled outcome.
@@ -69,6 +80,7 @@ public sealed class PayMaestroDbContext : DbContext
         attempt.Property(entity => entity.GatewayName).IsRequired().HasMaxLength(50);
         attempt.Property(entity => entity.ResultType).HasConversion<string>();
         attempt.Property(entity => entity.ProviderIdempotencyKey).IsRequired().HasMaxLength(200);
+        attempt.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);
         attempt.HasIndex(entity => entity.CreatedAt);
     }
 
@@ -80,5 +92,6 @@ public sealed class PayMaestroDbContext : DbContext
         flag.Property(entity => entity.Id).ValueGeneratedNever();
         flag.Property(entity => entity.RuleName).IsRequired().HasMaxLength(50);
         flag.Property(entity => entity.Details).IsRequired().HasMaxLength(500);
+        flag.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);
     }
 }

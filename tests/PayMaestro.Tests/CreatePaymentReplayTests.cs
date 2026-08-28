@@ -27,4 +27,24 @@ public class CreatePaymentReplayTests
 
         Assert.Equal(1, gateway.Charges);
     }
+
+    [Fact]
+    public async Task A_replayed_payment_reports_the_same_utc_instant_as_the_original()
+    {
+        using var db = new PaymentDatabase();
+        var gateway = new TestGateway("Alpha");
+
+        using var firstContext = db.NewContext();
+        var first = await db.NewOrchestrator(firstContext, gateways: [gateway])
+            .Execute("key-1", PaymentDatabase.Request());
+
+        using var replayContext = db.NewContext();
+        var replay = await db.NewOrchestrator(replayContext, gateways: [gateway])
+            .Execute("key-1", PaymentDatabase.Request());
+
+        // Reloaded from SQLite, the timestamp must still say it is UTC — serialized without the
+        // marker, "identical stored response" quietly becomes a different instant to the client.
+        Assert.Equal(DateTimeKind.Utc, replay.CreatedAt.Kind);
+        Assert.Equal(first.CreatedAt, replay.CreatedAt);
+    }
 }
