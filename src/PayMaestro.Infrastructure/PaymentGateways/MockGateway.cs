@@ -28,14 +28,14 @@ public abstract class MockGateway : IPaymentGateway
     protected abstract GatewayResult Decide(Payment payment);
 
     public async Task<GatewayResult> ProcessAsync(
-        Payment payment, string providerIdempotencyKey, CancellationToken ct = default)
+        Payment payment, string providerIdempotencyKey, CancellationToken cancellationToken = default)
     {
         if (_ledger.Find(providerIdempotencyKey) is { } alreadySettled)
         {
             return alreadySettled; // the provider recognises the key: no second charge
         }
 
-        await Task.Delay(Latency, ct);
+        await Task.Delay(Latency, cancellationToken);
 
         GatewayResult settled = _ledger.Settle(providerIdempotencyKey, Decide(payment));
 
@@ -47,7 +47,7 @@ public abstract class MockGateway : IPaymentGateway
         return settled;
     }
 
-    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken ct = default)
+    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken = default)
         => Task.FromResult(_ledger.Find(providerIdempotencyKey)
             ?? new GatewayResult(GatewayResultType.Error, "not_found", "The provider holds no record for this key."));
 }
