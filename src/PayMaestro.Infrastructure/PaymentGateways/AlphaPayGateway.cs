@@ -4,8 +4,13 @@ using PayMaestro.Domain.Gateways;
 
 namespace PayMaestro.Infrastructure.PaymentGateways;
 
-public class AlphaPayGateway(MockProviderLedger ledger) : MockGateway(ledger)
+public sealed class AlphaPayGateway : MockGateway
 {
+    public AlphaPayGateway(MockProviderLedger ledger)
+        : base(ledger)
+    {
+    }
+
     public override string Name => "AlphaPay";
 
     protected override TimeSpan Latency => TimeSpan.FromMilliseconds(150);

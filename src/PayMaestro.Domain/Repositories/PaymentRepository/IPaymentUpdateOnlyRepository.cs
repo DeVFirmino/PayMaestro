@@ -4,5 +4,5 @@ namespace PayMaestro.Domain.Repositories.PaymentRepository;
 
 public interface IPaymentUpdateOnlyRepository
 {
-    void Update(Payment payment);
+    public void Update(Payment payment);
 }

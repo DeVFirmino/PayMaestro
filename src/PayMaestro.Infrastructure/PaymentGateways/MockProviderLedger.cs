@@ -17,5 +17,5 @@ public sealed class MockProviderLedger
         => _settled.GetOrAdd(providerIdempotencyKey, result);
 
     public GatewayResult? Find(string providerIdempotencyKey)
-        => _settled.TryGetValue(providerIdempotencyKey, out var settled) ? settled : null;
+        => _settled.TryGetValue(providerIdempotencyKey, out GatewayResult? settled) ? settled : null;
 }

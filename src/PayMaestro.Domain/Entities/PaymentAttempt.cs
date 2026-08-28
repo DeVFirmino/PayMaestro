@@ -2,7 +2,7 @@ using PayMaestro.Domain.Enums;
 
 namespace PayMaestro.Domain.Entities;
 
-public class PaymentAttempt : EntityBase
+public sealed class PaymentAttempt : EntityBase
 {
     public Guid PaymentId { get; private set; }
     public string GatewayName { get; private set; } = null!;

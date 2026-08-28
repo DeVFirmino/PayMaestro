@@ -1,9 +1,11 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using PayMaestro.Application.Communication;
+using PayMaestro.Application.Contracts;
 using PayMaestro.Application.Options;
 using PayMaestro.Application.Services;
+using PayMaestro.Application.UseCases.Payments.CreatePayment;
+using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
 using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories.PaymentRepository;
@@ -23,7 +25,7 @@ public sealed class PaymentDatabase : IDisposable
 
     public PaymentDatabase()
     {
-        using var context = NewContext();
+        using PayMaestroDbContext context = NewContext();
         context.Database.EnsureCreated();
     }
 
@@ -32,31 +34,39 @@ public sealed class PaymentDatabase : IDisposable
             .UseSqlite($"Data Source={_path}")
             .Options);
 
-    public PaymentOrchestrator NewOrchestrator(
+    public CreatePaymentUseCase NewOrchestrator(
         PayMaestroDbContext context,
         IPaymentReadOnlyRepository? readRepo = null,
         IEnumerable<IFraudRule>? fraudRules = null,
         params IPaymentGateway[] gateways)
     {
-        var repository = new PaymentRepository(context);
+        PaymentRepository repository = new(context);
 
-        return new PaymentOrchestrator(
+        return new CreatePaymentUseCase(
             readRepo ?? repository, repository, new UnitOfWork(context),
             gateways, fraudRules ?? [], Routing(gateways), new CascadeExecutor());
     }
 
-    public PaymentReconciler NewReconciler(PayMaestroDbContext context, params IPaymentGateway[] gateways)
+    public ReconcilePaymentUseCase NewReconciler(PayMaestroDbContext context, params IPaymentGateway[] gateways)
         => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
 
-    public static RequestCreatePaymentJson Request(decimal amount = 100m, string cardNumber = "4111111111117777")
-        => new("ORDER-1", "cust-1", amount, "EUR", cardNumber, "203.0.113.10");
+    public static CreatePaymentRequest Request(decimal amount = 100m, string cardNumber = "4111111111117777")
+        => new()
+        {
+            MerchantReference = "ORDER-1",
+            CustomerId = "cust-1",
+            Amount = amount,
+            Currency = "EUR",
+            CardNumber = cardNumber,
+            CustomerIp = "203.0.113.10"
+        };
 
     private static IOptions<GatewayRoutingOptions> Routing(IPaymentGateway[] gateways)
         => Options.Create(new GatewayRoutingOptions
         {
-            Gateways = [.. gateways.Select((g, index) => new GatewayRouteOptions
+            Gateways = [.. gateways.Select((gateway, index) => new GatewayRouteOptions
             {
-                Name = g.Name,
+                Name = gateway.Name,
                 Priority = index,
                 SupportedCurrencies = ["EUR"],
                 MaxAmount = 1_000_000m
@@ -65,7 +75,7 @@ public sealed class PaymentDatabase : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();   // release the file handle before deleting it
+        SqliteConnection.ClearAllPools(); // release the file handle before deleting it
         File.Delete(_path);
     }
 }
