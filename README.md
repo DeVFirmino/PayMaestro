@@ -15,7 +15,7 @@ I built it over a weekend, spec-first, to learn how orchestration platforms serv
 
 ## The flow of one payment
 
-![Excalidraw diagram showing how PayMaestro validates, screens, routes, and stores one payment request](docs/architecture.svg)
+![Flow diagram showing how PayMaestro reserves an idempotency key, screens a payment, tries eligible gateways, and stores one final result](docs/architecture.svg)
 
 *Editable source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — open it on [excalidraw.com](https://excalidraw.com) and export the SVG again after changes.*
 
