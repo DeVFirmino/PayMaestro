@@ -165,6 +165,30 @@ public class PaymentRecoveryTests
         Assert.Equal(PaymentStatus.Captured, recoverable.Status);
     }
 
+    [Fact]
+    public async Task Should_recover_the_payments_behind_a_gateway_whose_query_keeps_failing()
+    {
+        using var db = new PaymentDatabase();
+        var healthy = new StaticQueryGateway("Alpha", GatewayResultType.Approved, "00");
+
+        // The unqueryable payment is older, so it heads the batch. If the thrown exception
+        // ended the pass, it would head the next one too, and block recovery for good.
+        Guid flakyId = await SeedStaleProcessingPayment(db, "key-flaky", gatewayName: "Flaky");
+        Guid recoverableId = await SeedStaleProcessingPayment(db, "key-behind");
+
+        using PayMaestroDbContext recoveryContext = db.NewContext();
+        int recovered = await db.NewRecovery(recoveryContext, new ThrowingQueryGateway("Flaky"), healthy)
+            .Execute(Cutoff, take: 10);
+
+        using PayMaestroDbContext verification = db.NewContext();
+        Payment flaky = await verification.Payment.SingleAsync(p => p.Id == flakyId);
+        Payment recoverable = await verification.Payment.SingleAsync(p => p.Id == recoverableId);
+
+        Assert.Equal(2, recovered);
+        Assert.Equal(PaymentStatus.RequiresReconciliation, flaky.Status);
+        Assert.Equal(PaymentStatus.Captured, recoverable.Status);
+    }
+
     private static DateTime Cutoff => DateTime.UtcNow.AddMinutes(1);
 
     /// <summary>A payment whose process stopped after committing the attempt.</summary>
@@ -181,6 +205,25 @@ public class PaymentRecoveryTests
         await context.SaveChangesAsync();
 
         return payment.Id;
+    }
+
+    /// <summary>A gateway that is registered but cannot answer any query.</summary>
+    private sealed class ThrowingQueryGateway : IPaymentGateway
+    {
+        public ThrowingQueryGateway(string name)
+        {
+            Name = name;
+        }
+
+        public string Name { get; }
+
+        public Task<GatewayResult> ProcessAsync(
+            Payment payment, string providerIdempotencyKey, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Recovery must never charge; it may only query.");
+
+        public Task<GatewayResult> QueryAsync(
+            string providerIdempotencyKey, CancellationToken cancellationToken = default)
+            => throw new TimeoutException("The provider's query endpoint did not answer.");
     }
 
     private sealed class ThrowingFraudRule : IFraudRule
