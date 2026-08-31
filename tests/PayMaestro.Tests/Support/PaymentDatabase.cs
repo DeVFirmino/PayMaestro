@@ -47,7 +47,7 @@ public sealed class PaymentDatabase : IDisposable
 
         return new CreatePaymentUseCase(
             readRepo ?? repository, repository, new UnitOfWork(context),
-            gateways, fraudRules ?? [], Routing(gateways), new CascadeExecutor(new UnitOfWork(context)),
+            gateways, fraudRules ?? [], Routing(gateways), new GatewayCascade(new UnitOfWork(context)),
             FingerprintGenerator);
     }
 

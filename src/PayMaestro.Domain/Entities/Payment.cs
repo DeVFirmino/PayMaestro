@@ -6,6 +6,9 @@ namespace PayMaestro.Domain.Entities;
 
 public sealed class Payment : EntityBase
 {
+    /// <summary>The longest merchant id the column accepts; a longer one is refused up front.</summary>
+    public const int MaxMerchantIdLength = 100;
+
     public string MerchantId { get; private set; } = null!;
     public string IdempotencyKey { get; private set; } = null!;
     public string RequestFingerprint { get; private set; } = null!;
@@ -37,7 +40,11 @@ public sealed class Payment : EntityBase
 
     private Payment() { } // EF Core
 
-    public static Payment Create(string merchantId, string idempotencyKey, string requestFingerprint,
+    /// <summary>
+    /// The idempotency key arrives already validated, as the value object it is: the format
+    /// check belongs to the key itself and runs once, where the key enters the system.
+    /// </summary>
+    public static Payment Create(string merchantId, IdempotencyKey idempotencyKey, string requestFingerprint,
         string merchantReference,
         string customerId, decimal amount, string currency, string cardBin,
         string cardLast4, string paymentMethodToken, string cardCountry, string customerIp, string ipCountry)
@@ -47,23 +54,36 @@ public sealed class Payment : EntityBase
             throw new ArgumentException("Merchant id is required.", nameof(merchantId));
         }
 
-        IdempotencyKey validatedKey = ValueObjects.IdempotencyKey.Create(idempotencyKey);
-        RequestFingerprint validatedFingerprint = ValueObjects.RequestFingerprint.Create(requestFingerprint);
-        Money money = Money.Create(amount, currency);
-        PaymentMethodToken validatedPaymentMethodToken = ValueObjects.PaymentMethodToken.Create(paymentMethodToken);
+        // Refused here, before the reservation is committed: a merchant id the column cannot
+        // hold would otherwise fail at SaveChanges with the payment already claimed.
+        if (merchantId.Length > MaxMerchantIdLength)
+        {
+            throw new ArgumentException(
+                $"Merchant id cannot exceed {MaxMerchantIdLength} characters.", nameof(merchantId));
+        }
+
+        if (amount <= 0)
+        {
+            throw new ArgumentException("Amount must be greater than zero.", nameof(amount));
+        }
+
+        if (string.IsNullOrWhiteSpace(currency) || currency.Length != 3)
+        {
+            throw new ArgumentException("Currency must be a 3-letter ISO code.", nameof(currency));
+        }
 
         return new Payment
         {
             MerchantId = merchantId,
-            IdempotencyKey = validatedKey.Value,
-            RequestFingerprint = validatedFingerprint.Value,
+            IdempotencyKey = idempotencyKey.Value,
+            RequestFingerprint = requestFingerprint,
             MerchantReference = merchantReference,
             CustomerId = customerId,
-            Amount = money.Amount,
-            Currency = money.Currency,
+            Amount = amount,
+            Currency = currency.ToUpperInvariant(),
             CardBin = cardBin,
             CardLast4 = cardLast4,
-            PaymentMethodToken = validatedPaymentMethodToken.Value,
+            PaymentMethodToken = paymentMethodToken,
             CardCountry = cardCountry,
             CustomerIp = customerIp,
             IpCountry = ipCountry,

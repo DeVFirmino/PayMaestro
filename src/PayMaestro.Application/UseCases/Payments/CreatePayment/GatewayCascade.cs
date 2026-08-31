@@ -4,7 +4,7 @@ using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories;
 
-namespace PayMaestro.Application.Services;
+namespace PayMaestro.Application.UseCases.Payments.CreatePayment;
 
 /// <summary>
 /// Tries each gateway in the route until one settles the payment.
@@ -15,11 +15,11 @@ namespace PayMaestro.Application.Services;
 /// first may have taken the money is exactly how a customer gets billed twice.
 /// Every attempt is recorded on the payment for auditing.
 /// </summary>
-public sealed class CascadeExecutor
+public sealed class GatewayCascade
 {
     private readonly IUnitOfWork _unitOfWork;
 
-    public CascadeExecutor(IUnitOfWork unitOfWork)
+    public GatewayCascade(IUnitOfWork unitOfWork)
     {
         _unitOfWork = unitOfWork;
     }

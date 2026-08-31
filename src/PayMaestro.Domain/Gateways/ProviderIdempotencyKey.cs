@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using PayMaestro.Domain.Entities;
 
 namespace PayMaestro.Domain.Gateways;
@@ -7,27 +9,22 @@ namespace PayMaestro.Domain.Gateways;
 /// attempt always presents the same key — that is what lets a retry after an unknown outcome
 /// be recognised by the provider instead of charging twice.
 /// </summary>
-public readonly record struct ProviderIdempotencyKey(string Value)
+public static class ProviderIdempotencyKey
 {
-    public const int MaxLength = 200;
-
-    public static ProviderIdempotencyKey Create(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new ArgumentException("Provider idempotency key is required.", nameof(value));
-        }
-
-        if (value.Length > MaxLength)
-        {
-            throw new ArgumentException($"Provider idempotency key cannot exceed {MaxLength} characters.", nameof(value));
-        }
-
-        return new ProviderIdempotencyKey(value);
-    }
-
+    /// <summary>
+    /// The merchant and the client key are hashed rather than concatenated. Both are
+    /// caller-supplied and unbounded in practice, and a key that outgrew its column would throw
+    /// after the reservation was already committed, leaving a payment stuck in Processing with
+    /// no attempt to recover from. Hashing keeps the length constant whatever the caller sends.
+    /// </summary>
     public static string For(Payment payment, string gatewayName, int attemptOrder)
-        => Create($"{payment.MerchantId}:{payment.IdempotencyKey}:{gatewayName}:{attemptOrder}").Value;
+        => $"{gatewayName}:{attemptOrder}:{Fingerprint(payment.MerchantId, payment.IdempotencyKey)}";
 
-    public override string ToString() => Value;
+    private static string Fingerprint(string merchantId, string idempotencyKey)
+    {
+        // A unit separator keeps "ab" + "c" from colliding with "a" + "bc".
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{merchantId}\u001F{idempotencyKey}"));
+
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
 }

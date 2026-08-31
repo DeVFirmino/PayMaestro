@@ -47,13 +47,15 @@ public sealed class PaymentRepository : IPaymentReadOnlyRepository, IPaymentWrit
             .ToListAsync(cancellationToken);
 
     public async Task<int> CountRecentDeclinedAttemptsAsync(
+        string merchantId,
         string cardBin,
         string cardLast4,
         DateTime since,
         CancellationToken cancellationToken)
     {
         return await _context.Payment
-            .Where(payment => payment.CardBin == cardBin && payment.CardLast4 == cardLast4)
+            .Where(payment => payment.MerchantId == merchantId
+                && payment.CardBin == cardBin && payment.CardLast4 == cardLast4)
             .SelectMany(payment => payment.Attempts)
             .CountAsync(attempt => attempt.CreatedAt >= since
                              && (attempt.ResultType == GatewayResultType.HardDecline

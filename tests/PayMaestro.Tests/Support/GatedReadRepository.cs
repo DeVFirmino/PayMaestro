@@ -38,16 +38,11 @@ public sealed class GatedReadRepository(
     public Task<Payment?> GetByMerchantAndIdAsync(string merchantId, Guid id, CancellationToken cancellationToken)
         => inner.GetByMerchantAndIdAsync(merchantId, id, cancellationToken);
 
-    public Task<IReadOnlyList<Payment>> ListWithStaleProcessingAttemptsAsync(
-        DateTime cutoff,
-        int take,
-        CancellationToken cancellationToken)
-        => inner.ListWithStaleProcessingAttemptsAsync(cutoff, take, cancellationToken);
-
     public Task<int> CountRecentDeclinedAttemptsAsync(
+        string merchantId,
         string cardBin,
         string cardLast4,
         DateTime since,
         CancellationToken cancellationToken)
-        => inner.CountRecentDeclinedAttemptsAsync(cardBin, cardLast4, since, cancellationToken);
+        => inner.CountRecentDeclinedAttemptsAsync(merchantId, cardBin, cardLast4, since, cancellationToken);
 }

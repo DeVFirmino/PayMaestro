@@ -29,7 +29,7 @@ public class CreatePaymentReplayTests
     }
 
     [Fact]
-    public async Task The_same_key_with_a_card_sharing_bin_and_last_four_is_rejected()
+    public async Task Should_reject_the_replay_when_the_card_shares_only_bin_and_last_four()
     {
         using var db = new PaymentDatabase();
         var gateway = new TestGateway("Alpha");
@@ -47,7 +47,7 @@ public class CreatePaymentReplayTests
     }
 
     [Fact]
-    public async Task The_same_key_can_be_used_independently_by_different_merchants()
+    public async Task Should_create_two_payments_when_two_merchants_use_the_same_key()
     {
         using var db = new PaymentDatabase();
         var gateway = new TestGateway("Alpha");
@@ -65,7 +65,7 @@ public class CreatePaymentReplayTests
     }
 
     [Fact]
-    public async Task A_payment_of_one_merchant_is_not_visible_to_another_merchant()
+    public async Task Should_hide_a_payment_when_another_merchant_asks_for_it()
     {
         using var db = new PaymentDatabase();
         var gateway = new TestGateway("Alpha");

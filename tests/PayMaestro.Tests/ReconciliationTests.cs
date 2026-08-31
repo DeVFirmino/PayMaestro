@@ -80,11 +80,11 @@ public class ReconciliationTests
         var attempt = await verification.PaymentAttempt.SingleAsync(a => a.PaymentId == pending.Id);
 
         // Derived, not random: the same attempt always presents the provider the same key.
-        Assert.Equal("merchant-1:key-1:Alpha:1", attempt.ProviderIdempotencyKey);
+        Assert.Equal(ProviderIdempotencyKey.For(TestPayment.Reserved(), "Alpha", 1), attempt.ProviderIdempotencyKey);
     }
 
     [Fact]
-    public async Task The_attempt_is_committed_as_processing_before_the_provider_answers()
+    public async Task Should_commit_the_attempt_as_processing_before_the_provider_answers()
     {
         using var db = new PaymentDatabase();
         var reachedGateway = new TaskCompletionSource();
@@ -105,14 +105,15 @@ public class ReconciliationTests
         using var observer = db.NewContext();
         var attempt = await observer.PaymentAttempt.SingleAsync();
         Assert.Equal(PaymentAttemptStatus.Processing, attempt.Status);
-        Assert.Equal("merchant-1:key-1:Alpha:1", attempt.ProviderIdempotencyKey);
+        Assert.Equal(
+            ProviderIdempotencyKey.For(TestPayment.Reserved(), "Alpha", 1), attempt.ProviderIdempotencyKey);
 
         releaseGateway.SetResult();
         await request;
     }
 
     [Fact]
-    public async Task Recovery_queries_the_provider_key_for_a_stale_processing_attempt()
+    public async Task Should_query_the_provider_key_when_a_processing_attempt_is_stale()
     {
         using var db = new PaymentDatabase();
         var gateway = new TestGateway("Alpha");

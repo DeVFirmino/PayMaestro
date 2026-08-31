@@ -27,7 +27,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
     private readonly IEnumerable<IPaymentGateway> _gateways;
     private readonly IEnumerable<IFraudRule> _fraudRules;
     private readonly IOptions<GatewayRoutingOptions> _routingOptions;
-    private readonly CascadeExecutor _cascade;
+    private readonly GatewayCascade _cascade;
     private readonly IPaymentRequestFingerprintGenerator _fingerprintGenerator;
 
     public CreatePaymentUseCase(
@@ -37,7 +37,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         IEnumerable<IPaymentGateway> gateways,
         IEnumerable<IFraudRule> fraudRules,
         IOptions<GatewayRoutingOptions> routingOptions,
-        CascadeExecutor cascade,
+        GatewayCascade cascade,
         IPaymentRequestFingerprintGenerator fingerprintGenerator)
     {
         _readRepository = readRepository;
@@ -68,7 +68,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
             return HandleExisting(existing, fingerprint.RequestFingerprint);
         }
 
-        Payment payment = CreatePaymentFrom(merchantId, validatedKey.Value, fingerprint, request);
+        Payment payment = CreatePaymentFrom(merchantId, validatedKey, fingerprint, request);
         payment.BeginProcessing();
 
         try
@@ -108,7 +108,12 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
 
     private static PaymentResponse HandleExisting(Payment existing, string requestFingerprint)
     {
-        if (existing.RequestFingerprint != requestFingerprint)
+        // Rows written before the fingerprint column existed carry an empty backfill value.
+        // They cannot be compared, and refusing them would turn a legitimate replay of an old
+        // key into a 422. An unknown fingerprint replays the stored outcome instead.
+        bool fingerprintIsKnown = existing.RequestFingerprint.Length > 0;
+
+        if (fingerprintIsKnown && existing.RequestFingerprint != requestFingerprint)
         {
             throw new IdempotencyKeyReuseException(existing.IdempotencyKey);
         }
@@ -146,7 +151,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
 
     private static Payment CreatePaymentFrom(
         string merchantId,
-        string idempotencyKey,
+        IdempotencyKey idempotencyKey,
         PaymentRequestFingerprint fingerprint,
         CreatePaymentRequest request)
         => Payment.Create(

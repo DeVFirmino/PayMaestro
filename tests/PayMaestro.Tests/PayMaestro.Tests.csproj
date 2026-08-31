@@ -26,7 +26,6 @@
     <ProjectReference Include="..\..\src\PayMaestro.Application\PayMaestro.Application.csproj" />
     <ProjectReference Include="..\..\src\PayMaestro.Infrastructure\PayMaestro.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\PayMaestro.API\PayMaestro.API.csproj" />
-    <ProjectReference Include="..\..\src\PayMaestro.FakeProvider\PayMaestro.FakeProvider.csproj" />
   </ItemGroup>
 
 </Project>

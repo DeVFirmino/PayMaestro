@@ -1,4 +1,5 @@
 using PayMaestro.Domain.Entities;
+using PayMaestro.Domain.ValueObjects;
 
 namespace PayMaestro.Tests.Support;
 
@@ -20,15 +21,16 @@ public static class TestPayment
         string customerIp = "203.0.113.10",
         string ipCountry = "MT")
         => Payment.Create(
-            merchantId, idempotencyKey, requestFingerprint, merchantReference, customerId,
+            merchantId, IdempotencyKey.Create(idempotencyKey), requestFingerprint, merchantReference, customerId,
             amount, currency, cardBin, cardLast4, paymentMethodToken,
             cardCountry, customerIp, ipCountry);
 
     /// <summary>A payment whose key is already claimed, which is the only state a cascade runs on.</summary>
-    public static Payment Reserved(string cardLast4 = "7777")
+    public static Payment Reserved(string cardLast4 = "7777", string idempotencyKey = "key-1")
     {
-        Payment payment = New(cardLast4: cardLast4);
+        Payment payment = New(cardLast4: cardLast4, idempotencyKey: idempotencyKey);
         payment.BeginProcessing();
+
         return payment;
     }
 }
