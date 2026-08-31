@@ -13,9 +13,9 @@ public sealed class GetPaymentByIdUseCase : IGetPaymentByIdUseCase
         _readRepository = readRepository;
     }
 
-    public async Task<PaymentResponse?> Execute(Guid paymentId, CancellationToken cancellationToken = default)
+    public async Task<PaymentResponse?> Execute(string merchantId, Guid paymentId, CancellationToken cancellationToken = default)
     {
-        Payment? payment = await _readRepository.GetByIdAsync(paymentId, cancellationToken);
+        Payment? payment = await _readRepository.GetByMerchantAndIdAsync(merchantId, paymentId, cancellationToken);
         return payment?.ToResponse();
     }
 }

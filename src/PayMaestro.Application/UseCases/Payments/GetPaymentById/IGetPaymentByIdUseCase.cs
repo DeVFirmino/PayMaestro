@@ -4,5 +4,5 @@ namespace PayMaestro.Application.UseCases.Payments.GetPaymentById;
 
 public interface IGetPaymentByIdUseCase
 {
-    public Task<PaymentResponse?> Execute(Guid paymentId, CancellationToken cancellationToken = default);
+    public Task<PaymentResponse?> Execute(string merchantId, Guid paymentId, CancellationToken cancellationToken = default);
 }

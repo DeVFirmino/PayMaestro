@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
+using PayMaestro.Domain.Gateways;
 using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
@@ -20,7 +22,7 @@ public class ReconciliationTests
 
         using var context = db.NewContext();
         var response = await db.NewOrchestrator(context, gateways: [silent, next])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         Assert.Equal(nameof(PaymentStatus.RequiresReconciliation), response.Status);
         Assert.Equal(1, silent.Charges);
@@ -35,10 +37,10 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var pending = await db.NewOrchestrator(chargeContext, gateways: [silent])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         using var reconcileContext = db.NewContext();
-        var settled = await db.NewReconciler(reconcileContext, silent).Execute(pending.Id);
+        var settled = await db.NewReconciler(reconcileContext, silent).Execute("merchant-1", pending.Id);
 
         Assert.Equal(nameof(PaymentStatus.Captured), settled.Status);
         Assert.Equal(1, silent.Charges);    // the query asked, it did not pay
@@ -52,13 +54,13 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var pending = await db.NewOrchestrator(chargeContext, gateways: [silent])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         // A provider with no memory of the attempt: nothing was charged.
         var forgetful = new TestGateway("Alpha");
 
         using var reconcileContext = db.NewContext();
-        var settled = await db.NewReconciler(reconcileContext, forgetful).Execute(pending.Id);
+        var settled = await db.NewReconciler(reconcileContext, forgetful).Execute("merchant-1", pending.Id);
 
         Assert.Equal(nameof(PaymentStatus.Declined), settled.Status);
         Assert.Equal(0, forgetful.Charges);
@@ -72,13 +74,71 @@ public class ReconciliationTests
 
         using var context = db.NewContext();
         var pending = await db.NewOrchestrator(context, gateways: [silent])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         using var verification = db.NewContext();
         var attempt = await verification.PaymentAttempt.SingleAsync(a => a.PaymentId == pending.Id);
 
         // Derived, not random: the same attempt always presents the provider the same key.
-        Assert.Equal("key-1:Alpha:1", attempt.ProviderIdempotencyKey);
+        Assert.Equal("merchant-1:key-1:Alpha:1", attempt.ProviderIdempotencyKey);
+    }
+
+    [Fact]
+    public async Task The_attempt_is_committed_as_processing_before_the_provider_answers()
+    {
+        using var db = new PaymentDatabase();
+        var reachedGateway = new TaskCompletionSource();
+        var releaseGateway = new TaskCompletionSource();
+
+        var gateway = new TestGateway("Alpha", whileCharging: async () =>
+        {
+            reachedGateway.SetResult();
+            await releaseGateway.Task;
+        });
+
+        using var context = db.NewContext();
+        Task request = db.NewOrchestrator(context, gateways: [gateway])
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
+
+        await reachedGateway.Task;
+
+        using var observer = db.NewContext();
+        var attempt = await observer.PaymentAttempt.SingleAsync();
+        Assert.Equal(PaymentAttemptStatus.Processing, attempt.Status);
+        Assert.Equal("merchant-1:key-1:Alpha:1", attempt.ProviderIdempotencyKey);
+
+        releaseGateway.SetResult();
+        await request;
+    }
+
+    [Fact]
+    public async Task Recovery_queries_the_provider_key_for_a_stale_processing_attempt()
+    {
+        using var db = new PaymentDatabase();
+        var gateway = new TestGateway("Alpha");
+
+        using (var seedContext = db.NewContext())
+        {
+            var payment = TestPayment.Reserved();
+
+            string providerKey = ProviderIdempotencyKey.For(payment, "Alpha", 1);
+            payment.RecordAttempt(PaymentAttempt.Start(payment.Id, "Alpha", 1, providerKey));
+            await seedContext.Payment.AddAsync(payment);
+            await seedContext.SaveChangesAsync();
+            await gateway.ProcessAsync(payment, providerKey);
+        }
+
+        using var recoveryContext = db.NewContext();
+        int recovered = await db.NewRecovery(recoveryContext, gateway)
+            .Execute(DateTime.UtcNow.AddMinutes(1), 10);
+
+        using var verification = db.NewContext();
+        var recoveredPayment = await verification.Payment.Include(p => p.Attempts).SingleAsync();
+
+        Assert.Equal(1, recovered);
+        Assert.Equal(PaymentStatus.Captured, recoveredPayment.Status);
+        Assert.Equal(PaymentAttemptStatus.Completed, recoveredPayment.Attempts.Single().Status);
+        Assert.Equal(1, gateway.Charges);
     }
 
     [Fact]
@@ -89,7 +149,7 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var pending = await db.NewOrchestrator(chargeContext, gateways: [silent])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         using var firstContext = db.NewContext();
         using var secondContext = db.NewContext();
@@ -98,10 +158,10 @@ public class ReconciliationTests
         // writes, the first has already settled it and the stamp it loaded is stale.
         await secondContext.Payment.Include(p => p.Attempts).FirstAsync(p => p.Id == pending.Id);
 
-        await db.NewReconciler(firstContext, silent).Execute(pending.Id);
+        await db.NewReconciler(firstContext, silent).Execute("merchant-1", pending.Id);
 
         await Assert.ThrowsAsync<ConcurrentPaymentModificationException>(
-            () => db.NewReconciler(secondContext, silent).Execute(pending.Id));
+            () => db.NewReconciler(secondContext, silent).Execute("merchant-1", pending.Id));
     }
 
     [Fact]
@@ -112,10 +172,10 @@ public class ReconciliationTests
 
         using var chargeContext = db.NewContext();
         var captured = await db.NewOrchestrator(chargeContext, gateways: [gateway])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         using var reconcileContext = db.NewContext();
-        var reconciled = await db.NewReconciler(reconcileContext, gateway).Execute(captured.Id);
+        var reconciled = await db.NewReconciler(reconcileContext, gateway).Execute("merchant-1", captured.Id);
 
         Assert.Equal(nameof(PaymentStatus.Captured), reconciled.Status);
         Assert.Equal(1, gateway.Charges);
@@ -128,6 +188,6 @@ public class ReconciliationTests
 
         using var context = db.NewContext();
         await Assert.ThrowsAsync<PaymentNotFoundException>(
-            () => db.NewReconciler(context, new TestGateway("Alpha")).Execute(Guid.NewGuid()));
+            () => db.NewReconciler(context, new TestGateway("Alpha")).Execute("merchant-1", Guid.NewGuid()));
     }
 }

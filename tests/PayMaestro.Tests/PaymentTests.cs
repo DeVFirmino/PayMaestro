@@ -1,6 +1,7 @@
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
+using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
 
@@ -102,13 +103,9 @@ public class PaymentTests
     [InlineData(0)]
     [InlineData(-10)]
     public void Amount_must_be_positive(decimal amount)
-        => Assert.Throws<ArgumentException>(() => Payment.Create(
-            "key", "ref", "cust", amount, "EUR", "411111", "7777", "MT", "203.0.113.10", "MT"));
+        => Assert.Throws<ArgumentException>(() => TestPayment.New(amount: amount));
 
-    private static Payment NewPayment() => Payment.Create(
-        idempotencyKey: "key-1", merchantReference: "ORDER-1", customerId: "cust-1",
-        amount: 100m, currency: "EUR", cardBin: "411111", cardLast4: "7777",
-        cardCountry: "MT", customerIp: "203.0.113.10", ipCountry: "MT");
+    private static Payment NewPayment() => TestPayment.New();
 
     private static Payment ReservedPayment()
     {

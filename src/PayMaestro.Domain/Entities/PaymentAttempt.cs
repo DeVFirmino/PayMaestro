@@ -7,6 +7,7 @@ public sealed class PaymentAttempt : EntityBase
     public Guid PaymentId { get; private set; }
     public string GatewayName { get; private set; } = null!;
     public int AttemptOrder { get; private set; }
+    public PaymentAttemptStatus Status { get; private set; }
     public GatewayResultType ResultType { get; private set; }
 
     /// <summary>
@@ -21,16 +22,24 @@ public sealed class PaymentAttempt : EntityBase
 
     private PaymentAttempt() { }
 
-    public static PaymentAttempt Create(Guid paymentId, string gatewayName,
-        int attemptOrder, GatewayResultType resultType, string gatewayResponseCode,
-        int durationMs, string providerIdempotencyKey) => new()
+    public static PaymentAttempt Start(Guid paymentId, string gatewayName,
+        int attemptOrder, string providerIdempotencyKey) => new()
         {
             PaymentId = paymentId,
             GatewayName = gatewayName,
             AttemptOrder = attemptOrder,
-            ResultType = resultType,
-            GatewayResponseCode = gatewayResponseCode,
-            DurationMs = durationMs,
+            Status = PaymentAttemptStatus.Processing,
+            ResultType = GatewayResultType.Uncertain,
+            GatewayResponseCode = "processing",
+            DurationMs = 0,
             ProviderIdempotencyKey = providerIdempotencyKey
         };
+
+    public void Complete(GatewayResultType resultType, string gatewayResponseCode, int durationMs)
+    {
+        Status = PaymentAttemptStatus.Completed;
+        ResultType = resultType;
+        GatewayResponseCode = gatewayResponseCode;
+        DurationMs = durationMs;
+    }
 }

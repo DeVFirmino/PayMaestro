@@ -15,9 +15,15 @@ public sealed class GatedReadRepository(
 {
     private bool _held;
 
-    public async Task<Payment?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken)
+    public async Task<Payment?> GetByMerchantAndIdempotencyKeyAsync(
+        string merchantId,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
     {
-        Payment? result = await inner.GetByIdempotencyKeyAsync(idempotencyKey, cancellationToken);
+        Payment? result = await inner.GetByMerchantAndIdempotencyKeyAsync(
+            merchantId,
+            idempotencyKey,
+            cancellationToken);
 
         if (!_held)
         {
@@ -29,13 +35,19 @@ public sealed class GatedReadRepository(
         return result;
     }
 
-    public Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
-        => inner.GetByIdAsync(id, cancellationToken);
+    public Task<Payment?> GetByMerchantAndIdAsync(string merchantId, Guid id, CancellationToken cancellationToken)
+        => inner.GetByMerchantAndIdAsync(merchantId, id, cancellationToken);
+
+    public Task<IReadOnlyList<Payment>> ListWithStaleProcessingAttemptsAsync(
+        DateTime cutoff,
+        int take,
+        CancellationToken cancellationToken)
+        => inner.ListWithStaleProcessingAttemptsAsync(cutoff, take, cancellationToken);
 
     public Task<int> CountRecentDeclinedAttemptsAsync(
         string cardBin,
         string cardLast4,
-        TimeSpan window,
+        DateTime since,
         CancellationToken cancellationToken)
-        => inner.CountRecentDeclinedAttemptsAsync(cardBin, cardLast4, window, cancellationToken);
+        => inner.CountRecentDeclinedAttemptsAsync(cardBin, cardLast4, since, cancellationToken);
 }

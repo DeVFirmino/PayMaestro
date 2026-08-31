@@ -31,7 +31,7 @@ public class IdempotencyReservationTests
         });
 
         using var context = db.NewContext();
-        await db.NewOrchestrator(context, gateways: [gateway]).Execute("key-1", PaymentDatabase.Request());
+        await db.NewOrchestrator(context, gateways: [gateway]).Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         Assert.NotNull(visibleDuringCharge);
         Assert.Equal(PaymentStatus.Processing, visibleDuringCharge!.Status);
@@ -52,14 +52,14 @@ public class IdempotencyReservationTests
 
         using var firstContext = db.NewContext();
         var firstRequest = db.NewOrchestrator(firstContext, gateways: [gateway])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         await reachedGateway.Task;              // the first request holds the key and is charging
 
         using var secondContext = db.NewContext();
         await Assert.ThrowsAsync<PaymentInProgressException>(
             () => db.NewOrchestrator(secondContext, gateways: [gateway])
-                    .Execute("key-1", PaymentDatabase.Request()));
+                    .Execute("merchant-1", "key-1", PaymentDatabase.Request()));
 
         releaseGateway.SetResult();
         var firstResponse = await firstRequest;
@@ -82,13 +82,13 @@ public class IdempotencyReservationTests
         var gatedRepo = new GatedReadRepository(new PaymentRepository(loserContext), loserHasRead, releaseLoser);
 
         var loserRequest = db.NewOrchestrator(loserContext, readRepo: gatedRepo, gateways: [gateway])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         await loserHasRead.Task;
 
         using var winnerContext = db.NewContext();
         var winner = await db.NewOrchestrator(winnerContext, gateways: [gateway])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         releaseLoser.SetResult();
         var loser = await loserRequest;
@@ -109,11 +109,11 @@ public class IdempotencyReservationTests
 
         using var firstContext = db.NewContext();
         var first = await db.NewOrchestrator(firstContext, gateways: [gateway])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         using var replayContext = db.NewContext();
         var replay = await db.NewOrchestrator(replayContext, gateways: [gateway])
-            .Execute("key-1", PaymentDatabase.Request());
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request());
 
         Assert.Equal(first.Id, replay.Id);
         Assert.Equal(1, gateway.Charges);
@@ -127,12 +127,12 @@ public class IdempotencyReservationTests
 
         using var firstContext = db.NewContext();
         await db.NewOrchestrator(firstContext, gateways: [gateway])
-            .Execute("key-1", PaymentDatabase.Request(amount: 100m));
+            .Execute("merchant-1", "key-1", PaymentDatabase.Request(amount: 100m));
 
         using var secondContext = db.NewContext();
         await Assert.ThrowsAsync<IdempotencyKeyReuseException>(
             () => db.NewOrchestrator(secondContext, gateways: [gateway])
-                    .Execute("key-1", PaymentDatabase.Request(amount: 250m)));
+                    .Execute("merchant-1", "key-1", PaymentDatabase.Request(amount: 250m)));
 
         Assert.Equal(1, gateway.Charges);
     }
@@ -142,8 +142,7 @@ public class IdempotencyReservationTests
     {
         // Guards the contract the mocks are meant to demonstrate, not just the test doubles.
         var gateway = new AlphaPayGateway(new MockProviderLedger());
-        var payment = Payment.Create("key-1", "ORDER-1", "cust-1", 100m, "EUR",
-            "411111", "7777", "MT", "203.0.113.10", "MT");
+        var payment = TestPayment.New();
 
         var first = await gateway.ProcessAsync(payment, "provider-key-1");
         var second = await gateway.ProcessAsync(payment, "provider-key-1");

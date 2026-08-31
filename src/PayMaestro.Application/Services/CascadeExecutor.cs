@@ -2,6 +2,7 @@ using System.Diagnostics;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
+using PayMaestro.Domain.Repositories;
 
 namespace PayMaestro.Application.Services;
 
@@ -16,6 +17,13 @@ namespace PayMaestro.Application.Services;
 /// </summary>
 public sealed class CascadeExecutor
 {
+    private readonly IUnitOfWork _unitOfWork;
+
+    public CascadeExecutor(IUnitOfWork unitOfWork)
+    {
+        _unitOfWork = unitOfWork;
+    }
+
     public async Task ExecuteAsync(
         Payment payment,
         IReadOnlyList<IPaymentGateway> route,
@@ -50,10 +58,14 @@ public sealed class CascadeExecutor
         payment.Decline(); // routes exhausted
     }
 
-    private static async Task<GatewayResult> TryGateway(
+    private async Task<GatewayResult> TryGateway(
         Payment payment, IPaymentGateway gateway, int order, CancellationToken cancellationToken)
     {
         string providerKey = ProviderIdempotencyKey.For(payment, gateway.Name, order);
+        PaymentAttempt attempt = PaymentAttempt.Start(payment.Id, gateway.Name, order, providerKey);
+        payment.RecordAttempt(attempt);
+        await _unitOfWork.CommitAsync(cancellationToken);
+
         long start = Stopwatch.GetTimestamp();
 
         GatewayResult result;
@@ -68,10 +80,10 @@ public sealed class CascadeExecutor
             result = new GatewayResult(GatewayResultType.Uncertain, "no_response", ex.Message);
         }
 
-        payment.RecordAttempt(PaymentAttempt.Create(
-            payment.Id, gateway.Name, order, result.ResultType,
-            result.ResponseCode, (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
-            providerKey));
+        attempt.Complete(
+            result.ResultType,
+            result.ResponseCode,
+            (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
 
         return result;
     }

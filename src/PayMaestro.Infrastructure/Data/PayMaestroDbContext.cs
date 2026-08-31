@@ -38,13 +38,16 @@ public sealed class PayMaestroDbContext : DbContext
         payment.HasKey(entity => entity.Id);
         payment.Property(entity => entity.Id).ValueGeneratedNever();
 
-        payment.HasIndex(entity => entity.IdempotencyKey).IsUnique();
+        payment.HasIndex(entity => new { entity.MerchantId, entity.IdempotencyKey }).IsUnique();
+        payment.Property(entity => entity.MerchantId).IsRequired().HasMaxLength(100);
         payment.Property(entity => entity.IdempotencyKey).IsRequired().HasMaxLength(100);
+        payment.Property(entity => entity.RequestFingerprint).IsRequired().HasMaxLength(128);
 
         payment.Property(entity => entity.Amount).HasPrecision(18, 2);
         payment.Property(entity => entity.Currency).IsRequired().HasMaxLength(3);
         payment.Property(entity => entity.CardBin).HasMaxLength(6);
         payment.Property(entity => entity.CardLast4).HasMaxLength(4);
+        payment.Property(entity => entity.PaymentMethodToken).IsRequired().HasMaxLength(128);
         payment.Property(entity => entity.Status).HasConversion<string>();
         payment.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);
         payment.Property(entity => entity.UpdatedAt).HasConversion(UtcTimestamp);
@@ -78,6 +81,7 @@ public sealed class PayMaestroDbContext : DbContext
         // exists" — that turns an attempt recorded after the reservation into an UPDATE of nothing.
         attempt.Property(entity => entity.Id).ValueGeneratedNever();
         attempt.Property(entity => entity.GatewayName).IsRequired().HasMaxLength(50);
+        attempt.Property(entity => entity.Status).HasConversion<string>();
         attempt.Property(entity => entity.ResultType).HasConversion<string>();
         attempt.Property(entity => entity.ProviderIdempotencyKey).IsRequired().HasMaxLength(200);
         attempt.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);

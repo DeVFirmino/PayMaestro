@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using PayMaestro.Application.Contracts;
+using Microsoft.AspNetCore.WebUtilities;
 using PayMaestro.Domain.Exceptions;
 
 namespace PayMaestro.API.Filters;
@@ -22,7 +22,13 @@ public sealed class ExceptionFilter : IExceptionFilter
 
             int statusCode = (int)known.StatusCode;
             context.HttpContext.Response.StatusCode = statusCode;
-            context.Result = new ObjectResult(new ErrorResponse { Error = known.Message })
+            context.Result = new ObjectResult(new ProblemDetails
+            {
+                Status = statusCode,
+                Title = ReasonPhrases.GetReasonPhrase(statusCode),
+                Detail = known.Message,
+                Instance = context.HttpContext.Request.Path
+            })
             {
                 StatusCode = statusCode
             };
@@ -33,7 +39,13 @@ public sealed class ExceptionFilter : IExceptionFilter
         if (context.Exception is ArgumentException argumentException)
         {
             context.HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            context.Result = new BadRequestObjectResult(new ErrorResponse { Error = argumentException.Message });
+            context.Result = new BadRequestObjectResult(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Bad Request",
+                Detail = argumentException.Message,
+                Instance = context.HttpContext.Request.Path
+            });
             context.ExceptionHandled = true;
             return;
         }
@@ -47,7 +59,13 @@ public sealed class ExceptionFilter : IExceptionFilter
             context.HttpContext.Request.Path);
 
         context.HttpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-        context.Result = new ObjectResult(new ErrorResponse { Error = "Unexpected error." })
+        context.Result = new ObjectResult(new ProblemDetails
+        {
+            Status = StatusCodes.Status500InternalServerError,
+            Title = "Internal Server Error",
+            Detail = "Unexpected error.",
+            Instance = context.HttpContext.Request.Path
+        })
         {
             StatusCode = StatusCodes.Status500InternalServerError
         };

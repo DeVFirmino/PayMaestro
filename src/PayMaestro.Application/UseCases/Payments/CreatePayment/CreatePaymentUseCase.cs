@@ -9,6 +9,7 @@ using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories;
 using PayMaestro.Domain.Repositories.PaymentRepository;
+using PayMaestro.Domain.ValueObjects;
 
 namespace PayMaestro.Application.UseCases.Payments.CreatePayment;
 
@@ -27,6 +28,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
     private readonly IEnumerable<IFraudRule> _fraudRules;
     private readonly IOptions<GatewayRoutingOptions> _routingOptions;
     private readonly CascadeExecutor _cascade;
+    private readonly IPaymentRequestFingerprintGenerator _fingerprintGenerator;
 
     public CreatePaymentUseCase(
         IPaymentReadOnlyRepository readRepository,
@@ -35,7 +37,8 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         IEnumerable<IPaymentGateway> gateways,
         IEnumerable<IFraudRule> fraudRules,
         IOptions<GatewayRoutingOptions> routingOptions,
-        CascadeExecutor cascade)
+        CascadeExecutor cascade,
+        IPaymentRequestFingerprintGenerator fingerprintGenerator)
     {
         _readRepository = readRepository;
         _writeRepository = writeRepository;
@@ -44,22 +47,28 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         _fraudRules = fraudRules;
         _routingOptions = routingOptions;
         _cascade = cascade;
+        _fingerprintGenerator = fingerprintGenerator;
     }
 
     public async Task<PaymentResponse> Execute(
+        string merchantId,
         string idempotencyKey,
         CreatePaymentRequest request,
         CancellationToken cancellationToken = default)
     {
-        Payment? existing = await _readRepository.GetByIdempotencyKeyAsync(
-            idempotencyKey,
+        IdempotencyKey validatedKey = IdempotencyKey.Create(idempotencyKey);
+        PaymentRequestFingerprint fingerprint = _fingerprintGenerator.Generate(merchantId, request);
+
+        Payment? existing = await _readRepository.GetByMerchantAndIdempotencyKeyAsync(
+            merchantId,
+            validatedKey.Value,
             cancellationToken);
         if (existing is not null)
         {
-            return HandleExisting(existing, request);
+            return HandleExisting(existing, fingerprint.RequestFingerprint);
         }
 
-        Payment payment = CreatePaymentFrom(idempotencyKey, request);
+        Payment payment = CreatePaymentFrom(merchantId, validatedKey.Value, fingerprint, request);
         payment.BeginProcessing();
 
         try
@@ -71,15 +80,16 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         {
             // A concurrent request claimed the key first. It owns the charge, and this request
             // has not called a gateway, so there is nothing to undo — report the winner's state.
-            Payment? winner = await _readRepository.GetByIdempotencyKeyAsync(
-                idempotencyKey,
+            Payment? winner = await _readRepository.GetByMerchantAndIdempotencyKeyAsync(
+                merchantId,
+                validatedKey.Value,
                 cancellationToken);
             if (winner is null)
             {
                 throw;
             }
 
-            return HandleExisting(winner, request);
+            return HandleExisting(winner, fingerprint.RequestFingerprint);
         }
 
         if (await ScreenForFraud(payment, cancellationToken))
@@ -96,9 +106,9 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         return payment.ToResponse();
     }
 
-    private static PaymentResponse HandleExisting(Payment existing, CreatePaymentRequest request)
+    private static PaymentResponse HandleExisting(Payment existing, string requestFingerprint)
     {
-        if (PayloadDiffers(existing, request))
+        if (existing.RequestFingerprint != requestFingerprint)
         {
             throw new IdempotencyKeyReuseException(existing.IdempotencyKey);
         }
@@ -113,20 +123,6 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         // Settled — or waiting for reconciliation, which the caller can see in the status.
         return existing.ToResponse();
     }
-
-    /// <summary>
-    /// A key only replays the outcome of the exact request that reserved it. Any change to what
-    /// would be charged — amount, currency, card, customer — is a different payment wearing an
-    /// old key, and must be refused rather than answered with the stored outcome.
-    /// </summary>
-    private static bool PayloadDiffers(Payment existing, CreatePaymentRequest request)
-        => existing.Amount != request.Amount
-        || existing.MerchantReference != request.MerchantReference
-        || existing.CustomerId != request.CustomerId
-        || existing.Currency != request.Currency.ToUpperInvariant()
-        || existing.CardBin != request.CardNumber[..6]
-        || existing.CardLast4 != request.CardNumber[^4..]
-        || existing.CustomerIp != request.CustomerIp;
 
     /// <summary>Runs every registered fraud rule; each hit is recorded as a FraudFlag.</summary>
     private async Task<bool> ScreenForFraud(Payment payment, CancellationToken cancellationToken)
@@ -148,12 +144,18 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         return suspicious;
     }
 
-    private static Payment CreatePaymentFrom(string idempotencyKey, CreatePaymentRequest request)
+    private static Payment CreatePaymentFrom(
+        string merchantId,
+        string idempotencyKey,
+        PaymentRequestFingerprint fingerprint,
+        CreatePaymentRequest request)
         => Payment.Create(
-            idempotencyKey, request.MerchantReference, request.CustomerId,
+            merchantId, idempotencyKey, fingerprint.RequestFingerprint,
+            request.MerchantReference, request.CustomerId,
             request.Amount, request.Currency.ToUpperInvariant(),
             cardBin: request.CardNumber[..6],
             cardLast4: request.CardNumber[^4..],
+            paymentMethodToken: fingerprint.PaymentMethodToken,
             // country lookups stubbed; production would resolve them via BIN table / GeoIP
             cardCountry: "MT", customerIp: request.CustomerIp, ipCountry: "MT");
 

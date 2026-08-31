@@ -5,12 +5,15 @@ using PayMaestro.Application.Contracts;
 using PayMaestro.Application.Options;
 using PayMaestro.Application.Services;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
+using PayMaestro.Application.UseCases.Payments.RecoverProcessingAttempts;
 using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
 using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories.PaymentRepository;
 using PayMaestro.Infrastructure.Data;
 using PayMaestro.Infrastructure.Data.Repositories;
+using PayMaestro.Infrastructure.PaymentRequests;
+using Microsoft.Extensions.Configuration;
 
 namespace PayMaestro.Tests.Support;
 
@@ -26,7 +29,7 @@ public sealed class PaymentDatabase : IDisposable
     public PaymentDatabase()
     {
         using PayMaestroDbContext context = NewContext();
-        context.Database.EnsureCreated();
+        context.Database.Migrate();
     }
 
     public PayMaestroDbContext NewContext() => new(
@@ -44,11 +47,24 @@ public sealed class PaymentDatabase : IDisposable
 
         return new CreatePaymentUseCase(
             readRepo ?? repository, repository, new UnitOfWork(context),
-            gateways, fraudRules ?? [], Routing(gateways), new CascadeExecutor());
+            gateways, fraudRules ?? [], Routing(gateways), new CascadeExecutor(new UnitOfWork(context)),
+            FingerprintGenerator);
     }
 
     public ReconcilePaymentUseCase NewReconciler(PayMaestroDbContext context, params IPaymentGateway[] gateways)
         => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
+
+    public RecoverProcessingAttemptsUseCase NewRecovery(PayMaestroDbContext context, params IPaymentGateway[] gateways)
+        => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
+
+    /// <summary>The keyed fingerprint generator, with the secret a test run may use openly.</summary>
+    public static HmacPaymentRequestFingerprintGenerator FingerprintGenerator { get; } =
+        new(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [HmacPaymentRequestFingerprintGenerator.SecretConfigurationKey] = "test-fingerprint-secret"
+            })
+            .Build());
 
     public static CreatePaymentRequest Request(decimal amount = 100m, string cardNumber = "4111111111117777")
         => new()

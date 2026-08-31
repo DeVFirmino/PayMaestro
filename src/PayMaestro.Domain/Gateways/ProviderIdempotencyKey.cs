@@ -7,8 +7,27 @@ namespace PayMaestro.Domain.Gateways;
 /// attempt always presents the same key — that is what lets a retry after an unknown outcome
 /// be recognised by the provider instead of charging twice.
 /// </summary>
-public static class ProviderIdempotencyKey
+public readonly record struct ProviderIdempotencyKey(string Value)
 {
+    public const int MaxLength = 200;
+
+    public static ProviderIdempotencyKey Create(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Provider idempotency key is required.", nameof(value));
+        }
+
+        if (value.Length > MaxLength)
+        {
+            throw new ArgumentException($"Provider idempotency key cannot exceed {MaxLength} characters.", nameof(value));
+        }
+
+        return new ProviderIdempotencyKey(value);
+    }
+
     public static string For(Payment payment, string gatewayName, int attemptOrder)
-        => $"{payment.IdempotencyKey}:{gatewayName}:{attemptOrder}";
+        => Create($"{payment.MerchantId}:{payment.IdempotencyKey}:{gatewayName}:{attemptOrder}").Value;
+
+    public override string ToString() => Value;
 }
