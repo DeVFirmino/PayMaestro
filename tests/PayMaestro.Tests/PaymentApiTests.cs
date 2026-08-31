@@ -53,7 +53,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task Configured_route_reaches_the_beta_2222_scenario()
+    public async Task Should_reach_the_beta_scenario_when_the_configured_route_is_used()
     {
         HttpResponseMessage response = await PostPayment("4111111111112222");
 
@@ -70,7 +70,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task A_hard_declined_card_stops_the_cascade_after_one_attempt()
+    public async Task Should_stop_the_cascade_after_one_attempt_when_the_card_is_hard_declined()
     {
         HttpResponseMessage response = await PostPayment("4111111111110000");
 
@@ -82,7 +82,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task A_charge_without_an_answer_waits_for_reconciliation()
+    public async Task Should_wait_for_reconciliation_when_a_charge_gets_no_answer()
     {
         HttpResponseMessage response = await PostPayment("4111111111119999");
 
@@ -93,7 +93,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task An_amount_above_the_first_cap_goes_to_the_next_gateway()
+    public async Task Should_use_the_next_gateway_when_the_amount_is_above_the_first_cap()
     {
         HttpResponseMessage response = await PostPayment("4111111111117777", amount: 6000m);
 
@@ -107,7 +107,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task A_currency_no_gateway_accepts_is_declined_without_an_attempt()
+    public async Task Should_decline_without_an_attempt_when_no_gateway_accepts_the_currency()
     {
         HttpResponseMessage response = await PostPayment("4111111111117777", currency: "JPY");
 
@@ -119,7 +119,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task Configured_route_reaches_the_gamma_3333_scenario()
+    public async Task Should_reach_the_gamma_scenario_when_the_configured_route_is_used()
     {
         HttpResponseMessage response = await PostPayment("4111111111113333");
 
@@ -134,7 +134,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task An_anonymous_caller_is_refused()
+    public async Task Should_refuse_the_request_when_the_caller_is_anonymous()
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/payments/{Guid.NewGuid()}");
         request.Headers.Add(PaymentApiFactory.TestAuthenticationHandler.AnonymousHeader, "true");
@@ -145,7 +145,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task The_health_endpoint_reports_the_service_as_healthy()
+    public async Task Should_report_healthy_when_the_health_endpoint_is_called()
     {
         HttpResponseMessage response = await _client.GetAsync("/health");
 
@@ -154,7 +154,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task Reusing_a_key_with_a_changed_payload_returns_422_as_problem_details()
+    public async Task Should_answer_422_as_problem_details_when_a_key_is_reused_with_a_changed_payload()
     {
         string key = Guid.NewGuid().ToString();
 

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using PayMaestro.Application.UseCases.Payments.RecoverProcessingAttempts;
 
 namespace PayMaestro.API.Workers;
@@ -47,8 +48,10 @@ public sealed class PaymentAttemptRecoveryWorker : BackgroundService
             {
                 return;
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is DbUpdateException or HttpRequestException)
             {
+                // A database or gateway fault ends this pass only. The next one starts from a
+                // fresh scope and re-reads whatever is still stale.
                 _logger.LogError(exception, "Payment attempt recovery failed.");
             }
         }

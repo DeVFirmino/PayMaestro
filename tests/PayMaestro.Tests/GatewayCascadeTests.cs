@@ -1,4 +1,4 @@
-using PayMaestro.Application.Services;
+using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
@@ -6,9 +6,9 @@ using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
 
-public class CascadeExecutorTests
+public class GatewayCascadeTests
 {
-    private readonly CascadeExecutor _cascade = new(new NullUnitOfWork());
+    private readonly GatewayCascade _cascade = new(new NullUnitOfWork());
 
     [Fact]
     public async Task Approves_on_first_gateway_and_stops()
@@ -105,8 +105,13 @@ public class CascadeExecutorTests
 
         await _cascade.ExecuteAsync(payment, route);
 
-        Assert.Equal("merchant-1:key-1:A:1", payment.Attempts[0].ProviderIdempotencyKey);
-        Assert.Equal("merchant-1:key-1:B:2", payment.Attempts[1].ProviderIdempotencyKey);
+        // Derived, not random: the same attempt always presents the same key, and each
+        // gateway and order gets its own so one attempt can never replay another's charge.
+        Assert.Equal(
+            ProviderIdempotencyKey.For(payment, "A", 1), payment.Attempts[0].ProviderIdempotencyKey);
+        Assert.Equal(
+            ProviderIdempotencyKey.For(payment, "B", 2), payment.Attempts[1].ProviderIdempotencyKey);
+        Assert.NotEqual(payment.Attempts[0].ProviderIdempotencyKey, payment.Attempts[1].ProviderIdempotencyKey);
     }
 
     private static Payment ReservedPayment()

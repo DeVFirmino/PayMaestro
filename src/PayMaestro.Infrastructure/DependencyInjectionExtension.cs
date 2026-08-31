@@ -7,9 +7,7 @@ using PayMaestro.Domain.Repositories.PaymentRepository;
 using PayMaestro.Infrastructure.Data;
 using PayMaestro.Infrastructure.Data.Repositories;
 using PayMaestro.Infrastructure.PaymentGateways;
-using PayMaestro.Infrastructure.PaymentGateways.Http;
 using PayMaestro.Infrastructure.PaymentRequests;
-using PayMaestro.Application.Options;
 using PayMaestro.Application.Services;
 
 namespace PayMaestro.Infrastructure;
@@ -28,19 +26,8 @@ public static class DependencyInjectionExtension
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddSingleton<IPaymentRequestFingerprintGenerator, HmacPaymentRequestFingerprintGenerator>();
 
-        PaymentProviderOptions provider = new();
-        configuration.GetSection("PaymentProviders").Bind(provider);
-
-        if (string.Equals(provider.Mode, PaymentProviderOptions.HttpMode, StringComparison.OrdinalIgnoreCase))
-        {
-            GatewayRoutingOptions routing = new();
-            configuration.GetSection("GatewayRouting").Bind(routing);
-            services.AddHttpPaymentGateways(provider, routing);
-            return;
-        }
-
-        // The in-process mock acquirers share one ledger so a key they already settled is
-        // recognised across requests, the way a real provider's idempotency contract behaves.
+        // The mock acquirers share one ledger so a key they already settled is recognised
+        // across requests, the way a real provider's idempotency contract behaves.
         services.AddSingleton<MockProviderLedger>();
         services.AddScoped<IPaymentGateway, AlphaPayGateway>();
         services.AddScoped<IPaymentGateway, BetaPayGateway>();

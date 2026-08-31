@@ -1,6 +1,6 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
+using PayMaestro.API.Security;
 using Microsoft.AspNetCore.Mvc;
 using PayMaestro.Application.Contracts;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
@@ -13,7 +13,7 @@ namespace PayMaestro.API.Controllers;
 [Route("api/payments")]
 [Produces("application/json")]
 [Authorize]
-[EnableRateLimiting("per-merchant")]
+[EnableRateLimiting(PaymentSecurityExtension.PerMerchantRateLimitPolicy)]
 public sealed class PaymentsController : ControllerBase
 {
     /// <summary>Creates and processes a payment.</summary>
@@ -27,7 +27,7 @@ public sealed class PaymentsController : ControllerBase
     /// <response code="409">The same Idempotency-Key is still being processed by another request.</response>
     /// <response code="422">The Idempotency-Key was already used with a different payload.</response>
     [HttpPost]
-    [Authorize(Policy = "payments:write")]
+    [Authorize(Policy = PaymentPolicies.Write)]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -64,7 +64,7 @@ public sealed class PaymentsController : ControllerBase
     /// <response code="409">The payment is still being processed by its original request.</response>
     /// <response code="503">The gateway that took the attempt is no longer registered.</response>
     [HttpPost("{id:guid}/reconcile")]
-    [Authorize(Policy = "payments:reconcile")]
+    [Authorize(Policy = PaymentPolicies.Reconcile)]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -79,7 +79,7 @@ public sealed class PaymentsController : ControllerBase
     /// <response code="200">The payment was found.</response>
     /// <response code="404">No payment exists with this id.</response>
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "payments:read")]
+    [Authorize(Policy = PaymentPolicies.Read)]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
@@ -91,8 +91,5 @@ public sealed class PaymentsController : ControllerBase
         return response is null ? NotFound() : Ok(response);
     }
 
-    private string GetMerchantId()
-        => User.FindFirstValue("merchant_id")
-        ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
-        ?? throw new InvalidOperationException("Authenticated merchant identity is missing.");
+    private string GetMerchantId() => MerchantIdentity.Require(User);
 }

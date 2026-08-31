@@ -18,12 +18,13 @@ public interface IPaymentReadOnlyRepository
         Guid id,
         CancellationToken cancellationToken);
 
-    public Task<IReadOnlyList<Payment>> ListWithStaleProcessingAttemptsAsync(
-        DateTime cutoff,
-        int take,
-        CancellationToken cancellationToken);
-
+    /// <summary>
+    /// Counts recent declines on one card, for one merchant. The merchant scope is part of the
+    /// rule, not an optimisation: without it a card declined at another merchant would reject
+    /// this merchant's payment, and would leak that other merchant's card activity.
+    /// </summary>
     public Task<int> CountRecentDeclinedAttemptsAsync(
+        string merchantId,
         string cardBin,
         string cardLast4,
         DateTime since,

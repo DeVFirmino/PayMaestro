@@ -10,6 +10,13 @@ namespace PayMaestro.Infrastructure.Migrations
     [Migration("20260831120000_AddMerchantScopedIdempotencyAndAttemptRecovery")]
     public partial class AddMerchantScopedIdempotencyAndAttemptRecovery : Migration
     {
+        /// <summary>
+        /// Rows written before payments were scoped per merchant belong to no merchant. They are
+        /// attributed to a reserved id rather than to a real one, so that no live merchant
+        /// inherits another tenant's history through the new unique index.
+        /// </summary>
+        private const string LegacyMerchantId = "legacy-unscoped";
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -30,7 +37,7 @@ namespace PayMaestro.Infrastructure.Migrations
                 type: "TEXT",
                 maxLength: 100,
                 nullable: false,
-                defaultValue: "merchant-1");
+                defaultValue: LegacyMerchantId);
 
             migrationBuilder.AddColumn<string>(
                 name: "PaymentMethodToken",
