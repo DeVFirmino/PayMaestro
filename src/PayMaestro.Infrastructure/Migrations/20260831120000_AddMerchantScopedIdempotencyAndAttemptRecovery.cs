@@ -11,15 +11,19 @@ namespace PayMaestro.Infrastructure.Migrations
     public partial class AddMerchantScopedIdempotencyAndAttemptRecovery : Migration
     {
         /// <summary>
-        /// Rows written before payments were scoped per merchant belong to no merchant. They are
-        /// attributed to a reserved id rather than to a real one, so that no live merchant
-        /// inherits another tenant's history through the new unique index.
+        /// Rows written before payments were scoped per merchant belong to no merchant, and no
+        /// backfill can attribute them truthfully. Keeping them under a pseudo-tenant would
+        /// break their idempotency contract anyway: the merchant that created them could never
+        /// reach them again. This migration deletes them instead — explicitly, in the migration
+        /// itself, so applying it to a database with history is a visible decision, not an
+        /// accident. It is therefore irreversible.
         /// </summary>
-        private const string LegacyMerchantId = "legacy-unscoped";
-
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql("DELETE FROM FraudFlags;");
+            migrationBuilder.Sql("DELETE FROM PaymentAttempt;");
+            migrationBuilder.Sql("DELETE FROM Payment;");
+
             migrationBuilder.DropIndex(
                 name: "IX_Payment_IdempotencyKey",
                 table: "Payment");
@@ -37,7 +41,7 @@ namespace PayMaestro.Infrastructure.Migrations
                 type: "TEXT",
                 maxLength: 100,
                 nullable: false,
-                defaultValue: LegacyMerchantId);
+                defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "PaymentMethodToken",
@@ -62,34 +66,13 @@ namespace PayMaestro.Infrastructure.Migrations
                 unique: true);
         }
 
-        /// <inheritdoc />
+        /// <summary>
+        /// The Up deleted the pre-scoping rows, and once two merchants have used the same key
+        /// the global unique index cannot be rebuilt either. Rolling back means restoring the
+        /// database from a backup, not running this migration in reverse.
+        /// </summary>
         protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropIndex(
-                name: "IX_Payment_MerchantId_IdempotencyKey",
-                table: "Payment");
-
-            migrationBuilder.DropColumn(
-                name: "Status",
-                table: "PaymentAttempt");
-
-            migrationBuilder.DropColumn(
-                name: "MerchantId",
-                table: "Payment");
-
-            migrationBuilder.DropColumn(
-                name: "PaymentMethodToken",
-                table: "Payment");
-
-            migrationBuilder.DropColumn(
-                name: "RequestFingerprint",
-                table: "Payment");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Payment_IdempotencyKey",
-                table: "Payment",
-                column: "IdempotencyKey",
-                unique: true);
-        }
+            => throw new NotSupportedException(
+                "This migration deleted the pre-merchant-scoping rows and cannot be reverted. Restore from a backup.");
     }
 }

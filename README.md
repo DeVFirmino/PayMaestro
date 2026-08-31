@@ -57,7 +57,9 @@ dotnet ef migrations bundle \
 ./efbundle --connection "Data Source=/path/to/paymaestro.db"
 ```
 
-Rows written before payments were scoped per merchant are backfilled with the reserved merchant id `legacy-unscoped`, so no live merchant inherits them through the new unique index. Their request fingerprint is backfilled empty; see the note under *Idempotency*.
+The merchant-scoping migration **deletes rows written before payments were scoped per merchant**. Those rows belong to no merchant, no backfill could attribute them truthfully, and keeping them under a pseudo-tenant would break their idempotency contract anyway: the merchant that created them could never reach them again. The deletion happens inside the migration, so applying it to a database with history is a visible decision. The migration is irreversible — rolling back means restoring from a backup.
+
+A local database created by an older checkout (which used `EnsureCreated` instead of migrations) has no migrations history and cannot be migrated. Delete the `.db` file and let the application recreate it.
 
 ## Authentication and authorization
 
@@ -72,6 +74,8 @@ The API uses JSON Web Token (JWT) bearer authentication. Every payment endpoint 
 An authorization server sends granted scopes as one space-delimited string under `scope`, or under `scp`. `ScopeClaimTransformation` splits that into one claim per scope before authorization runs, so a real token is accepted and not only a token whose scopes already arrive split.
 
 The merchant comes from the token, never from the request. The API reads the `merchant_id` claim, and falls back to `NameIdentifier`. No body field and no header can change it. A merchant reaches only its own payments: a read or a reconcile for another merchant's payment answers `404`.
+
+Every policy also requires a usable merchant identity. A token whose merchant claim is missing, or equals the reserved id `legacy-unscoped` — which an earlier revision of the scoping migration used to group unattributable rows — answers `403` on either claim route.
 
 Each merchant gets its own fixed window of 120 requests per minute. Above that the answer is `429` with a ProblemDetails body. The window is held in memory, so each instance counts on its own.
 
@@ -101,8 +105,6 @@ Every request must send an `Idempotency-Key` header. The key must be 1 to 100 ch
 The service stores a keyed HMAC-SHA256 fingerprint of the request, not the request. It covers, in a canonical order: `amount`, `currency`, `customerId`, `customerIp`, `merchantId`, `merchantReference` and `paymentMethodToken`.
 
 The payment method token is itself an HMAC-SHA256 of the merchant and the digits of the card number. The full card number is never stored. Two different card numbers produce two different tokens even when they share the first six digits and the last four, so replaying a changed card under an old key answers `422`.
-
-Rows created before this column existed carry an empty fingerprint. An empty fingerprint cannot be compared, so those rows replay their stored outcome instead of answering `422`.
 
 ## Fraud screening
 
@@ -144,9 +146,14 @@ The merchant and the client key are hashed rather than concatenated. Both are ca
 
 - Approved at the provider: the payment becomes `Captured`.
 - Still no answer: the payment becomes `RequiresReconciliation`.
+- The gateway that took the attempt is no longer registered: the payment becomes `RequiresReconciliation` and the missing gateway is logged. It cannot be queried automatically, and left in `Processing` it would head this batch forever and starve every payment behind it.
 - Anything else — hard decline, soft decline, gateway error, or no record of the key: the payment becomes `Declined`.
 
+The same pass also sweeps payments stuck in `Processing` for more than two minutes with **no attempt at all** — a reservation whose flow died before its cascade committed a first attempt, for example on a failing fraud rule. The attempt row is committed before any gateway call, so with no attempt no gateway was ever contacted: those payments are declined outright, and no money can have moved.
+
 Declining on a soft decline or a gateway error is a deliberate divergence from the live cascade, which would carry those to the next acquirer. Recovery has no cascade left to continue, and leaving the payment in `Processing` would strand it: its key would answer `409` forever and nothing would pick it up again. The merchant retries under a new idempotency key.
+
+The two-minute cutoff assumes no gateway call outlives it, which holds for the in-process mocks. Before any real, out-of-process gateway is introduced, each attempt needs a timeout below that cutoff, and a first `not_found` answer must not become a definitive decline without an explicit temporal policy — otherwise recovery could declare a charge dead while its request is still in flight.
 
 Each payment is committed on its own. A stale concurrency stamp on one payment therefore cannot discard the outcomes already committed for the payments before it; the pass stops there, and the next one starts from a clean unit of work.
 
@@ -182,7 +189,7 @@ Errors use ASP.NET Core ProblemDetails, produced by one global exception filter.
 
 | Endpoint | What it does | Answers |
 |---|---|---|
-| `POST /api/payments` | Creates and processes a payment. Requires the `Idempotency-Key` header. | `200` with status and attempt list · `400` invalid input, missing header or malformed key · `401` no token · `403` missing scope · `409` key still in flight · `422` key reused with a different request · `429` over the merchant's rate limit |
+| `POST /api/payments` | Creates and processes a payment. Requires the `Idempotency-Key` header. | `200` with status and attempt list · `400` invalid input, missing header or malformed key · `401` no token · `403` missing scope or unusable merchant identity · `409` key still in flight · `422` key reused with a different request · `429` over the merchant's rate limit |
 | `GET /api/payments/{id}` | Returns the payment and its attempt list. | `200` · `401` · `403` · `404` with an empty body |
 | `POST /api/payments/{id}/reconcile` | Settles a payment whose charge got no answer. | `200` · `401` · `403` · `404` unknown id or another merchant's payment · `409` still processing, or a stale reconciler · `503` gateway no longer registered |
 | `GET /health` | Reports service health. Needs no token. | `200` `Healthy` · `503` `Unhealthy` |
@@ -206,17 +213,17 @@ Repository capabilities state what a caller may do with what they get back. Read
 dotnet test
 ```
 
-70 xUnit tests cover:
+74 xUnit tests cover:
 
 - the payment state machine and its guards;
 - the cascade policy: approve, soft decline, hard decline, error and unknown outcome;
 - the idempotency race: two concurrent requests against a real SQLite file, one charge only;
 - replay, `409` and `422`, including a changed card that shares the first six and last four digits;
 - merchant isolation: the same key used by two merchants, one merchant's payment invisible to another, and decline velocity that ignores another merchant's declines;
-- migration compatibility: a row with an empty backfilled fingerprint still replays instead of answering `422`;
+- the migration contract: a database with pre-scoping rows loses them when the merchant-scoping migration runs, verified against a database that actually holds one;
 - stuck-payment prevention: the provider idempotency key stays inside its column for any merchant id, and an oversized merchant id is refused before the reservation is committed;
-- recovery: soft declines and unknown keys settle instead of stranding the payment, a batch leaves nothing in `Processing`, and one concurrency conflict does not discard outcomes already committed;
-- scope parsing: space-delimited `scope` and `scp` claims satisfy the real policies;
+- recovery: soft declines and unknown keys settle instead of stranding the payment, a reservation that never reached an attempt is declined, an unregistered gateway parks the payment in reconciliation instead of starving the batch, a batch leaves nothing in `Processing`, and one concurrency conflict does not discard outcomes already committed;
+- scope parsing: space-delimited `scope` and `scp` claims satisfy the real policies, and the reserved merchant id answers `403` on both claim routes;
 - reconciliation, including the stale concurrent reconciler;
 - the HTTP contract over a real pipeline (`WebApplicationFactory`): the empty `404` body, the refused anonymous caller, the health endpoint, the `422` ProblemDetails body and each documented card scenario.
 

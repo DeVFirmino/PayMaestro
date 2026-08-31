@@ -108,12 +108,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
 
     private static PaymentResponse HandleExisting(Payment existing, string requestFingerprint)
     {
-        // Rows written before the fingerprint column existed carry an empty backfill value.
-        // They cannot be compared, and refusing them would turn a legitimate replay of an old
-        // key into a 422. An unknown fingerprint replays the stored outcome instead.
-        bool fingerprintIsKnown = existing.RequestFingerprint.Length > 0;
-
-        if (fingerprintIsKnown && existing.RequestFingerprint != requestFingerprint)
+        if (existing.RequestFingerprint != requestFingerprint)
         {
             throw new IdempotencyKeyReuseException(existing.IdempotencyKey);
         }

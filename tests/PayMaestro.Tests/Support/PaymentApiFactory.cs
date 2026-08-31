@@ -55,6 +55,12 @@ public sealed class PaymentApiFactory : WebApplicationFactory<Program>
         /// <summary>A request that carries this header is treated as an anonymous caller.</summary>
         public const string AnonymousHeader = "X-Test-Anonymous";
 
+        /// <summary>Overrides the merchant_id claim of the authenticated caller.</summary>
+        public const string MerchantHeader = "X-Test-Merchant";
+
+        /// <summary>Replaces merchant_id with a NameIdentifier claim holding this value.</summary>
+        public const string SubjectOnlyHeader = "X-Test-Subject";
+
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
             if (Request.Headers.ContainsKey(AnonymousHeader))
@@ -62,9 +68,15 @@ public sealed class PaymentApiFactory : WebApplicationFactory<Program>
                 return Task.FromResult(AuthenticateResult.NoResult());
             }
 
+            Claim identityClaim = Request.Headers.TryGetValue(SubjectOnlyHeader, out var subject)
+                ? new Claim(ClaimTypes.NameIdentifier, subject.ToString())
+                : new Claim("merchant_id", Request.Headers.TryGetValue(MerchantHeader, out var merchant)
+                    ? merchant.ToString()
+                    : "merchant-1");
+
             Claim[] claims =
             [
-                new("merchant_id", "merchant-1"),
+                identityClaim,
                 new("scope", "payments:write"),
                 new("scope", "payments:read"),
                 new("scope", "payments:reconcile")

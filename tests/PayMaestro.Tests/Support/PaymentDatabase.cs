@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PayMaestro.Application.Contracts;
 using PayMaestro.Application.Options;
@@ -55,7 +56,8 @@ public sealed class PaymentDatabase : IDisposable
         => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
 
     public RecoverProcessingAttemptsUseCase NewRecovery(PayMaestroDbContext context, params IPaymentGateway[] gateways)
-        => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
+        => new(new PaymentRepository(context), new UnitOfWork(context), gateways,
+            NullLogger<RecoverProcessingAttemptsUseCase>.Instance);
 
     /// <summary>The keyed fingerprint generator, with the secret a test run may use openly.</summary>
     public static HmacPaymentRequestFingerprintGenerator FingerprintGenerator { get; } =

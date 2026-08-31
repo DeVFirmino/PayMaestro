@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using PayMaestro.API.Security;
 using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
@@ -131,6 +132,36 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
         Assert.Equal("GammaPay", attempts[2].GetProperty("gatewayName").GetString());
         Assert.Equal("Error", attempts[2].GetProperty("resultType").GetString());
         Assert.Equal("Declined", body.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Should_refuse_the_request_when_the_merchant_claim_is_the_reserved_legacy_id()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/payments/{Guid.NewGuid()}");
+        request.Headers.Add(
+            PaymentApiFactory.TestAuthenticationHandler.MerchantHeader,
+            MerchantIdentity.ReservedLegacyId);
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        // The reserved id may never act as a caller: any database migrated with the revision
+        // that grouped legacy rows under it would hand that caller another tenant's history.
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Should_refuse_the_request_when_the_subject_claim_is_the_reserved_legacy_id()
+    {
+        // MerchantIdentity falls back to NameIdentifier when merchant_id is absent, so the
+        // reserved id must be refused on that route too.
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/payments/{Guid.NewGuid()}");
+        request.Headers.Add(
+            PaymentApiFactory.TestAuthenticationHandler.SubjectOnlyHeader,
+            MerchantIdentity.ReservedLegacyId);
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

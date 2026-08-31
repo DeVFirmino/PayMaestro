@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -44,19 +45,25 @@ public static class PaymentSecurityExtension
     {
         services.AddAuthorization(options =>
         {
+            // Every policy also demands a usable merchant identity: present, and not the
+            // reserved legacy id. Enforced here, in authorization, so no endpoint can reach a
+            // use case for a caller the platform cannot attribute.
             options.AddPolicy(PaymentPolicies.Write, policy => policy
                 .RequireAuthenticatedUser()
-                .RequireClaim(ScopeClaimTransformation.ScopeClaimType, PaymentPolicies.Write));
+                .RequireClaim(ScopeClaimTransformation.ScopeClaimType, PaymentPolicies.Write)
+                .RequireAssertion(HasUsableMerchantIdentity));
 
             // Writing implies reading: a merchant that may create a payment may read it back.
             options.AddPolicy(PaymentPolicies.Read, policy => policy
                 .RequireAuthenticatedUser()
                 .RequireClaim(
-                    ScopeClaimTransformation.ScopeClaimType, PaymentPolicies.Read, PaymentPolicies.Write));
+                    ScopeClaimTransformation.ScopeClaimType, PaymentPolicies.Read, PaymentPolicies.Write)
+                .RequireAssertion(HasUsableMerchantIdentity));
 
             options.AddPolicy(PaymentPolicies.Reconcile, policy => policy
                 .RequireAuthenticatedUser()
-                .RequireClaim(ScopeClaimTransformation.ScopeClaimType, PaymentPolicies.Reconcile));
+                .RequireClaim(ScopeClaimTransformation.ScopeClaimType, PaymentPolicies.Reconcile)
+                .RequireAssertion(HasUsableMerchantIdentity));
         });
 
         return services;
@@ -72,6 +79,9 @@ public static class PaymentSecurityExtension
 
         return services;
     }
+
+    private static bool HasUsableMerchantIdentity(AuthorizationHandlerContext context)
+        => MerchantIdentity.IsUsable(context.User);
 
     /// <summary>One window per merchant, so a noisy merchant cannot spend another's allowance.</summary>
     private static RateLimitPartition<string> PartitionByMerchant(HttpContext httpContext)
