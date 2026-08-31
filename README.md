@@ -146,7 +146,7 @@ The merchant and the client key are hashed rather than concatenated. Both are ca
 
 - Approved at the provider: the payment becomes `Captured`.
 - Still no answer: the payment becomes `RequiresReconciliation`.
-- The gateway that took the attempt is no longer registered: the payment becomes `RequiresReconciliation` and the missing gateway is logged. It cannot be queried automatically, and left in `Processing` it would head this batch forever and starve every payment behind it.
+- The gateway that took the attempt is no longer registered, or its query throws instead of answering: the payment becomes `RequiresReconciliation` and the cause is logged. Without an answer to act on, leaving it in `Processing` would head this batch forever — it is the oldest and nothing changed it — and starve every payment behind it. Parked in reconciliation it stays actionable through the reconcile endpoint.
 - Anything else — hard decline, soft decline, gateway error, or no record of the key: the payment becomes `Declined`.
 
 The same pass also sweeps payments stuck in `Processing` for more than two minutes with **no attempt at all** — a reservation whose flow died before its cascade committed a first attempt, for example on a failing fraud rule. The attempt row is committed before any gateway call, so with no attempt no gateway was ever contacted: those payments are declined outright, and no money can have moved.
@@ -213,7 +213,7 @@ Repository capabilities state what a caller may do with what they get back. Read
 dotnet test
 ```
 
-74 xUnit tests cover:
+75 xUnit tests cover:
 
 - the payment state machine and its guards;
 - the cascade policy: approve, soft decline, hard decline, error and unknown outcome;
@@ -222,7 +222,7 @@ dotnet test
 - merchant isolation: the same key used by two merchants, one merchant's payment invisible to another, and decline velocity that ignores another merchant's declines;
 - the migration contract: a database with pre-scoping rows loses them when the merchant-scoping migration runs, verified against a database that actually holds one;
 - stuck-payment prevention: the provider idempotency key stays inside its column for any merchant id, and an oversized merchant id is refused before the reservation is committed;
-- recovery: soft declines and unknown keys settle instead of stranding the payment, a reservation that never reached an attempt is declined, an unregistered gateway parks the payment in reconciliation instead of starving the batch, a batch leaves nothing in `Processing`, and one concurrency conflict does not discard outcomes already committed;
+- recovery: soft declines and unknown keys settle instead of stranding the payment, a reservation that never reached an attempt is declined, an unregistered gateway or a throwing query parks the payment in reconciliation instead of starving the batch, a batch leaves nothing in `Processing`, and one concurrency conflict does not discard outcomes already committed;
 - scope parsing: space-delimited `scope` and `scp` claims satisfy the real policies, and the reserved merchant id answers `403` on both claim routes;
 - reconciliation, including the stale concurrent reconciler;
 - the HTTP contract over a real pipeline (`WebApplicationFactory`): the empty `404` body, the refused anonymous caller, the health endpoint, the `422` ProblemDetails body and each documented card scenario.

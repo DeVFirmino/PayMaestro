@@ -56,13 +56,12 @@ public sealed class RecoverProcessingAttemptsUseCase : IRecoverProcessingAttempt
             PaymentAttempt attempt = NewestProcessingAttempt(payment);
             IPaymentGateway? gateway = _gateways.FirstOrDefault(candidate => candidate.Name == attempt.GatewayName);
 
+            GatewayResult? outcome = null;
+
             if (gateway is null)
             {
                 // The gateway that took the attempt is no longer registered, so its outcome
-                // cannot be queried automatically. Left in Processing the payment would occupy
-                // the head of this batch forever and starve every payment behind it; parked in
-                // reconciliation it waits, visibly, for an operator instead.
-                payment.MarkForReconciliation();
+                // cannot be queried automatically.
                 _logger.LogWarning(
                     "Gateway {GatewayName} is no longer registered; payment {PaymentId} was moved to reconciliation.",
                     attempt.GatewayName,
@@ -70,7 +69,30 @@ public sealed class RecoverProcessingAttemptsUseCase : IRecoverProcessingAttempt
             }
             else
             {
-                GatewayResult outcome = await gateway.QueryAsync(attempt.ProviderIdempotencyKey, cancellationToken);
+                try
+                {
+                    outcome = await gateway.QueryAsync(attempt.ProviderIdempotencyKey, cancellationToken);
+                }
+                catch (Exception exception) when (cancellationToken.IsCancellationRequested is false)
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Querying gateway {GatewayName} failed; payment {PaymentId} was moved to reconciliation.",
+                        attempt.GatewayName,
+                        payment.Id);
+                }
+            }
+
+            if (outcome is null)
+            {
+                // No answer to act on. Left in Processing the payment would occupy the head of
+                // this batch forever — it is the oldest, and nothing here changed it — and
+                // starve every payment behind it. Parked in reconciliation it stays visible and
+                // actionable through the reconcile endpoint instead.
+                payment.MarkForReconciliation();
+            }
+            else
+            {
                 attempt.Complete(outcome.ResultType, outcome.ResponseCode, attempt.DurationMs);
                 Settle(payment, outcome.ResultType);
             }
