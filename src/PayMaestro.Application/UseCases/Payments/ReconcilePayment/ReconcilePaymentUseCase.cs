@@ -28,9 +28,9 @@ public sealed class ReconcilePaymentUseCase : IReconcilePaymentUseCase
         _gateways = gateways;
     }
 
-    public async Task<PaymentResponse> Execute(Guid paymentId, CancellationToken cancellationToken = default)
+    public async Task<PaymentResponse> Execute(string merchantId, Guid paymentId, CancellationToken cancellationToken = default)
     {
-        Payment payment = await _readRepository.GetByIdAsync(paymentId, cancellationToken)
+        Payment payment = await _readRepository.GetByMerchantAndIdAsync(merchantId, paymentId, cancellationToken)
             ?? throw new PaymentNotFoundException(paymentId);
 
         if (payment.Status is PaymentStatus.Processing)

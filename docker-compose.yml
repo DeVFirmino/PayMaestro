@@ -1,0 +1,35 @@
+services:
+  fake-provider:
+    build:
+      context: .
+      dockerfile: src/PayMaestro.FakeProvider/Dockerfile
+    environment:
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Ledger: "Data Source=/data/fake-provider.db"
+    volumes:
+      - provider-ledger:/data
+    ports:
+      - "5300:8080"
+
+  api:
+    build:
+      context: .
+      dockerfile: src/PayMaestro.API/Dockerfile
+    depends_on:
+      - fake-provider
+    environment:
+      # Development applies the migrations at startup, which keeps this file to one command.
+      ASPNETCORE_ENVIRONMENT: "Development"
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: "Data Source=/data/paymaestro.db"
+      PaymentSecurity__FingerprintSecret: "compose-fingerprint-secret-change-before-production"
+      PaymentProviders__Mode: "Http"
+      PaymentProviders__BaseUrl: "http://fake-provider:8080"
+    volumes:
+      - api-data:/data
+    ports:
+      - "5225:8080"
+
+volumes:
+  provider-ledger:
+  api-data:

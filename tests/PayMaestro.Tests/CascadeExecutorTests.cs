@@ -2,12 +2,13 @@ using PayMaestro.Application.Services;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
+using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
 
 public class CascadeExecutorTests
 {
-    private readonly CascadeExecutor _cascade = new();
+    private readonly CascadeExecutor _cascade = new(new NullUnitOfWork());
 
     [Fact]
     public async Task Approves_on_first_gateway_and_stops()
@@ -104,19 +105,13 @@ public class CascadeExecutorTests
 
         await _cascade.ExecuteAsync(payment, route);
 
-        Assert.Equal("key-1:A:1", payment.Attempts[0].ProviderIdempotencyKey);
-        Assert.Equal("key-1:B:2", payment.Attempts[1].ProviderIdempotencyKey);
+        Assert.Equal("merchant-1:key-1:A:1", payment.Attempts[0].ProviderIdempotencyKey);
+        Assert.Equal("merchant-1:key-1:B:2", payment.Attempts[1].ProviderIdempotencyKey);
     }
 
     private static Payment ReservedPayment()
     {
-        var payment = Payment.Create(
-            idempotencyKey: "key-1", merchantReference: "ORDER-1", customerId: "cust-1",
-            amount: 100m, currency: "EUR", cardBin: "411111", cardLast4: "7777",
-            cardCountry: "MT", customerIp: "203.0.113.10", ipCountry: "MT");
-
-        payment.BeginProcessing();   // the cascade only ever runs on a reserved payment
-        return payment;
+        return TestPayment.Reserved();   // the cascade only ever runs on a reserved payment
     }
 
     private static List<IPaymentGateway> Route(params IPaymentGateway[] gateways) => [.. gateways];

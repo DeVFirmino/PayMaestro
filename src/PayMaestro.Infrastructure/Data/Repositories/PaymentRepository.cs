@@ -14,29 +14,48 @@ public sealed class PaymentRepository : IPaymentReadOnlyRepository, IPaymentWrit
         _context = context;
     }
 
-    public async Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<Payment?> GetByMerchantAndIdAsync(
+        string merchantId,
+        Guid id,
+        CancellationToken cancellationToken)
         => await _context.Payment
             .Include(payment => payment.Attempts)
             .Include(payment => payment.FraudFlags)
-            .FirstOrDefaultAsync(payment => payment.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(payment => payment.MerchantId == merchantId && payment.Id == id, cancellationToken);
 
-    public async Task<Payment?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken)
+    public async Task<Payment?> GetByMerchantAndIdempotencyKeyAsync(
+        string merchantId,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
         => await _context.Payment
             .Include(payment => payment.Attempts)
             .Include(payment => payment.FraudFlags)
-            .FirstOrDefaultAsync(payment => payment.IdempotencyKey == idempotencyKey, cancellationToken);
+            .FirstOrDefaultAsync(payment => payment.MerchantId == merchantId
+                && payment.IdempotencyKey == idempotencyKey, cancellationToken);
+
+    public async Task<IReadOnlyList<Payment>> ListWithStaleProcessingAttemptsAsync(
+        DateTime cutoff,
+        int take,
+        CancellationToken cancellationToken)
+        => await _context.Payment
+            .Include(payment => payment.Attempts)
+            .Where(payment => payment.Status == PaymentStatus.Processing
+                && payment.Attempts.Any(attempt => attempt.Status == PaymentAttemptStatus.Processing
+                    && attempt.CreatedAt <= cutoff))
+            .OrderBy(payment => payment.UpdatedAt)
+            .Take(take)
+            .ToListAsync(cancellationToken);
 
     public async Task<int> CountRecentDeclinedAttemptsAsync(
         string cardBin,
         string cardLast4,
-        TimeSpan window,
+        DateTime since,
         CancellationToken cancellationToken)
     {
-        DateTime cutoff = DateTime.UtcNow - window;
         return await _context.Payment
             .Where(payment => payment.CardBin == cardBin && payment.CardLast4 == cardLast4)
             .SelectMany(payment => payment.Attempts)
-            .CountAsync(attempt => attempt.CreatedAt >= cutoff
+            .CountAsync(attempt => attempt.CreatedAt >= since
                              && (attempt.ResultType == GatewayResultType.HardDecline
                                  || attempt.ResultType == GatewayResultType.SoftDecline),
                 cancellationToken);

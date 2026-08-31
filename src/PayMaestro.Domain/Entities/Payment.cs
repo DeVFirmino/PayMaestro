@@ -1,17 +1,21 @@
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
+using PayMaestro.Domain.ValueObjects;
 
 namespace PayMaestro.Domain.Entities;
 
 public sealed class Payment : EntityBase
 {
+    public string MerchantId { get; private set; } = null!;
     public string IdempotencyKey { get; private set; } = null!;
+    public string RequestFingerprint { get; private set; } = null!;
     public string MerchantReference { get; private set; } = null!;
     public string CustomerId { get; private set; } = null!;
     public decimal Amount { get; private set; }
     public string Currency { get; private set; } = null!;
     public string CardBin { get; private set; } = null!;
     public string CardLast4 { get; private set; } = null!;
+    public string PaymentMethodToken { get; private set; } = null!;
     public string CardCountry { get; private set; } = null!;
     public string CustomerIp { get; private set; } = null!;
     public string IpCountry { get; private set; } = null!;
@@ -33,34 +37,33 @@ public sealed class Payment : EntityBase
 
     private Payment() { } // EF Core
 
-    public static Payment Create(string idempotencyKey, string merchantReference,
+    public static Payment Create(string merchantId, string idempotencyKey, string requestFingerprint,
+        string merchantReference,
         string customerId, decimal amount, string currency, string cardBin,
-        string cardLast4, string cardCountry, string customerIp, string ipCountry)
+        string cardLast4, string paymentMethodToken, string cardCountry, string customerIp, string ipCountry)
     {
-        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        if (string.IsNullOrWhiteSpace(merchantId))
         {
-            throw new ArgumentException("Idempotency key is required.", nameof(idempotencyKey));
+            throw new ArgumentException("Merchant id is required.", nameof(merchantId));
         }
 
-        if (amount <= 0)
-        {
-            throw new ArgumentException("Amount must be greater than zero.", nameof(amount));
-        }
-
-        if (string.IsNullOrWhiteSpace(currency) || currency.Length != 3)
-        {
-            throw new ArgumentException("Currency must be a 3-letter ISO code.", nameof(currency));
-        }
+        IdempotencyKey validatedKey = ValueObjects.IdempotencyKey.Create(idempotencyKey);
+        RequestFingerprint validatedFingerprint = ValueObjects.RequestFingerprint.Create(requestFingerprint);
+        Money money = Money.Create(amount, currency);
+        PaymentMethodToken validatedPaymentMethodToken = ValueObjects.PaymentMethodToken.Create(paymentMethodToken);
 
         return new Payment
         {
-            IdempotencyKey = idempotencyKey,
+            MerchantId = merchantId,
+            IdempotencyKey = validatedKey.Value,
+            RequestFingerprint = validatedFingerprint.Value,
             MerchantReference = merchantReference,
             CustomerId = customerId,
-            Amount = amount,
-            Currency = currency.ToUpperInvariant(),
+            Amount = money.Amount,
+            Currency = money.Currency,
             CardBin = cardBin,
             CardLast4 = cardLast4,
+            PaymentMethodToken = validatedPaymentMethodToken.Value,
             CardCountry = cardCountry,
             CustomerIp = customerIp,
             IpCountry = ipCountry,

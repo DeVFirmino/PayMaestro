@@ -97,8 +97,23 @@ namespace PayMaestro.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("MerchantId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("MerchantReference")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaymentMethodToken")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
@@ -110,7 +125,7 @@ namespace PayMaestro.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("IdempotencyKey")
+                    b.HasIndex("MerchantId", "IdempotencyKey")
                         .IsUnique();
 
                     b.ToTable("Payment", t =>
@@ -151,6 +166,10 @@ namespace PayMaestro.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ResultType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("TEXT");
 

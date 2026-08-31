@@ -15,10 +15,12 @@ public sealed class DeclineVelocityRule : IFraudRule
     private static readonly TimeSpan Window = TimeSpan.FromHours(24);
 
     private readonly IPaymentReadOnlyRepository _readRepository;
+    private readonly TimeProvider _timeProvider;
 
-    public DeclineVelocityRule(IPaymentReadOnlyRepository readRepository)
+    public DeclineVelocityRule(IPaymentReadOnlyRepository readRepository, TimeProvider timeProvider)
     {
         _readRepository = readRepository;
+        _timeProvider = timeProvider;
     }
 
     public string RuleName => "DeclineVelocity";
@@ -28,7 +30,7 @@ public sealed class DeclineVelocityRule : IFraudRule
         int declines = await _readRepository.CountRecentDeclinedAttemptsAsync(
             payment.CardBin,
             payment.CardLast4,
-            Window,
+            _timeProvider.GetUtcNow().UtcDateTime - Window,
             cancellationToken);
 
         return declines >= MaxRecentDeclines
