@@ -10,9 +10,20 @@ public static class MerchantIdentity
 {
     public const string ClaimType = "merchant_id";
 
+    /// <summary>
+    /// Reserved: an earlier revision of the merchant-scoping migration grouped pre-scoping rows
+    /// under this id. No caller may ever authenticate as it — a token carrying it would own
+    /// whatever any database migrated with that revision still holds.
+    /// </summary>
+    public const string ReservedLegacyId = "legacy-unscoped";
+
     /// <summary>The merchant, or null when the caller carries no merchant identity.</summary>
     public static string? Find(ClaimsPrincipal principal)
         => principal.FindFirstValue(ClaimType) ?? principal.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    /// <summary>Whether the caller carries a merchant identity the API may act for.</summary>
+    public static bool IsUsable(ClaimsPrincipal principal)
+        => Find(principal) is { Length: > 0 } merchant && merchant != ReservedLegacyId;
 
     /// <summary>
     /// The merchant of an authorized caller. Every endpoint that calls this is behind a policy

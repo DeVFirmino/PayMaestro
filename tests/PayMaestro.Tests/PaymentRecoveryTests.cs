@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
+using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Infrastructure.Data;
 using PayMaestro.Tests.Support;
@@ -112,20 +113,81 @@ public class PaymentRecoveryTests
         Assert.Single(payments, payment => payment.Status == PaymentStatus.Declined);
     }
 
+    [Fact]
+    public async Task Should_decline_a_stale_reservation_that_never_reached_an_attempt()
+    {
+        using var db = new PaymentDatabase();
+        var gateway = new TestGateway("Alpha");
+
+        // The reservation commits, then a fraud rule fails: the payment is left in Processing
+        // with no attempt, which the attempt-based query can never see.
+        using (PayMaestroDbContext context = db.NewContext())
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => db.NewOrchestrator(context, fraudRules: [new ThrowingFraudRule()], gateways: [gateway])
+                    .Execute("merchant-1", "key-orphan", PaymentDatabase.Request()));
+        }
+
+        using PayMaestroDbContext recoveryContext = db.NewContext();
+        int recovered = await db.NewRecovery(recoveryContext, gateway).Execute(Cutoff, take: 10);
+
+        // No attempt was committed, and the attempt commits before any gateway call, so no
+        // money can have moved: declining is safe and frees the key's 409.
+        Assert.Equal(1, recovered);
+        Assert.Equal(0, gateway.Charges);
+
+        using PayMaestroDbContext replayContext = db.NewContext();
+        var replayed = await db.NewOrchestrator(replayContext, gateways: [gateway])
+            .Execute("merchant-1", "key-orphan", PaymentDatabase.Request());
+        Assert.Equal(nameof(PaymentStatus.Declined), replayed.Status);
+    }
+
+    [Fact]
+    public async Task Should_move_the_payment_to_reconciliation_when_its_gateway_is_no_longer_registered()
+    {
+        using var db = new PaymentDatabase();
+        var gateway = new StaticQueryGateway("Alpha", GatewayResultType.Approved, "00");
+
+        // The unqueryable payment is older, so it heads the batch. Left in Processing it would
+        // occupy that spot forever and starve everything behind it.
+        Guid ghostId = await SeedStaleProcessingPayment(db, "key-ghost", gatewayName: "Ghost");
+        Guid recoverableId = await SeedStaleProcessingPayment(db, "key-recoverable");
+
+        using PayMaestroDbContext recoveryContext = db.NewContext();
+        int recovered = await db.NewRecovery(recoveryContext, gateway).Execute(Cutoff, take: 10);
+
+        using PayMaestroDbContext verification = db.NewContext();
+        Payment ghost = await verification.Payment.SingleAsync(p => p.Id == ghostId);
+        Payment recoverable = await verification.Payment.SingleAsync(p => p.Id == recoverableId);
+
+        Assert.Equal(2, recovered);
+        Assert.Equal(PaymentStatus.RequiresReconciliation, ghost.Status);
+        Assert.Equal(PaymentStatus.Captured, recoverable.Status);
+    }
+
     private static DateTime Cutoff => DateTime.UtcNow.AddMinutes(1);
 
     /// <summary>A payment whose process stopped after committing the attempt.</summary>
-    private static async Task<Guid> SeedStaleProcessingPayment(PaymentDatabase db, string idempotencyKey)
+    private static async Task<Guid> SeedStaleProcessingPayment(
+        PaymentDatabase db, string idempotencyKey, string gatewayName = "Alpha")
     {
         using PayMaestroDbContext context = db.NewContext();
 
         Payment payment = TestPayment.Reserved(idempotencyKey: idempotencyKey);
-        string providerKey = ProviderIdempotencyKey.For(payment, "Alpha", 1);
-        payment.RecordAttempt(PaymentAttempt.Start(payment.Id, "Alpha", 1, providerKey));
+        string providerKey = ProviderIdempotencyKey.For(payment, gatewayName, 1);
+        payment.RecordAttempt(PaymentAttempt.Start(payment.Id, gatewayName, 1, providerKey));
 
         context.Payment.Add(payment);
         await context.SaveChangesAsync();
 
         return payment.Id;
+    }
+
+    private sealed class ThrowingFraudRule : IFraudRule
+    {
+        public string RuleName => "AlwaysThrows";
+
+        public Task<FraudVerdict> EvaluateAsync(Payment payment, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("The fraud store is unavailable.");
     }
 }

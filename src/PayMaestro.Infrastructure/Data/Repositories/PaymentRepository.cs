@@ -46,6 +46,18 @@ public sealed class PaymentRepository : IPaymentReadOnlyRepository, IPaymentWrit
             .Take(take)
             .ToListAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<Payment>> ListStaleProcessingWithoutAttemptsAsync(
+        DateTime cutoff,
+        int take,
+        CancellationToken cancellationToken)
+        => await _context.Payment
+            .Where(payment => payment.Status == PaymentStatus.Processing
+                && payment.Attempts.Count == 0
+                && payment.UpdatedAt <= cutoff)
+            .OrderBy(payment => payment.UpdatedAt)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+
     public async Task<int> CountRecentDeclinedAttemptsAsync(
         string merchantId,
         string cardBin,

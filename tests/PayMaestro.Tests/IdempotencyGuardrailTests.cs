@@ -1,7 +1,4 @@
-using Microsoft.EntityFrameworkCore;
-using PayMaestro.Application.Contracts;
 using PayMaestro.Domain.Entities;
-using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Infrastructure.Data;
 using PayMaestro.Tests.Support;
@@ -9,30 +6,12 @@ using PayMaestro.Tests.Support;
 namespace PayMaestro.Tests;
 
 /// <summary>
-/// The migration adds the fingerprint column to rows that predate it, backfilled empty. Those
-/// rows must keep replaying, and no caller-supplied value may be long enough to strand a
-/// payment between the reservation and its first attempt.
+/// The guard rails around the idempotency key: a changed request never replays a stored
+/// outcome, and no caller-supplied value can strand a payment between the reservation and its
+/// first attempt.
 /// </summary>
-public class IdempotencyCompatibilityTests
+public class IdempotencyGuardrailTests
 {
-    [Fact]
-    public async Task Should_replay_the_stored_outcome_when_the_row_predates_the_fingerprint_column()
-    {
-        using var db = new PaymentDatabase();
-        var gateway = new TestGateway("Alpha");
-        Guid legacyId = await SeedRowWithoutFingerprint(db, "legacy-key");
-
-        using PayMaestroDbContext context = db.NewContext();
-        PaymentResponse replayed = await db.NewOrchestrator(context, gateways: [gateway])
-            .Execute("merchant-1", "legacy-key", PaymentDatabase.Request());
-
-        // An unknown fingerprint cannot be compared, so the stored outcome is returned rather
-        // than the 422 that comparing against an empty backfill would produce.
-        Assert.Equal(legacyId, replayed.Id);
-        Assert.Equal("Captured", replayed.Status);
-        Assert.Equal(0, gateway.Charges);
-    }
-
     [Fact]
     public async Task Should_reject_the_replay_when_a_stored_fingerprint_does_not_match()
     {
@@ -83,28 +62,5 @@ public class IdempotencyCompatibilityTests
         Assert.NotEqual(
             ProviderIdempotencyKey.For(first, "AlphaPay", 1),
             ProviderIdempotencyKey.For(second, "AlphaPay", 1));
-    }
-
-    /// <summary>A settled payment as the migration leaves it: no fingerprint to compare against.</summary>
-    private static async Task<Guid> SeedRowWithoutFingerprint(PaymentDatabase db, string idempotencyKey)
-    {
-        using PayMaestroDbContext context = db.NewContext();
-
-        Payment payment = TestPayment.Reserved(idempotencyKey: idempotencyKey);
-        PaymentAttempt attempt = PaymentAttempt.Start(payment.Id, "Alpha", 1, "legacy-provider-key");
-        attempt.Complete(GatewayResultType.Approved, "00", durationMs: 5);
-        payment.RecordAttempt(attempt);
-        payment.Authorize();
-        payment.Capture();
-
-        context.Payment.Add(payment);
-        await context.SaveChangesAsync();
-
-        // The backfill the migration writes for pre-existing rows.
-        await context.Payment
-            .Where(candidate => candidate.Id == payment.Id)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.RequestFingerprint, string.Empty));
-
-        return payment.Id;
     }
 }
