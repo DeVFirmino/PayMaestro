@@ -15,14 +15,16 @@ internal static class PaymentResponseMapper
         CreatedAt = payment.CreatedAt,
         Attempts = payment.Attempts
             .OrderBy(attempt => attempt.AttemptOrder)
-            .Select(attempt => new PaymentAttemptResponse
-            {
-                GatewayName = attempt.GatewayName,
-                AttemptOrder = attempt.AttemptOrder,
-                ResultType = attempt.ResultType.ToString(),
-                GatewayResponseCode = attempt.GatewayResponseCode,
-                DurationMs = attempt.DurationMs
-            })
-            .ToList()
+            .Select(ToResponse)
+            .ToList(),
+    };
+
+    private static PaymentAttemptResponse ToResponse(PaymentAttempt attempt) => new()
+    {
+        GatewayName = attempt.GatewayName,
+        AttemptOrder = attempt.AttemptOrder,
+        ResultType = attempt.ResultType.ToString(),
+        GatewayResponseCode = attempt.GatewayResponseCode,
+        DurationMs = attempt.DurationMs,
     };
 }

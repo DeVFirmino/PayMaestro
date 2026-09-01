@@ -1,6 +1,6 @@
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Fraud;
-using PayMaestro.Domain.Repositories.PaymentRepository;
+using PayMaestro.Domain.Repositories.Payments;
 
 namespace PayMaestro.Application.Fraud;
 
@@ -14,18 +14,18 @@ public sealed class DeclineVelocityRule : IFraudRule
     private const int MaxRecentDeclines = 3;
     private static readonly TimeSpan Window = TimeSpan.FromHours(24);
 
-    private readonly IPaymentReadOnlyRepository _readRepository;
+    private readonly IPaymentReadOnlyRepository _payments;
 
-    public DeclineVelocityRule(IPaymentReadOnlyRepository readRepository)
+    public DeclineVelocityRule(IPaymentReadOnlyRepository payments)
     {
-        _readRepository = readRepository;
+        _payments = payments;
     }
 
     public string RuleName => "DeclineVelocity";
 
     public async Task<FraudVerdict> EvaluateAsync(Payment payment, CancellationToken cancellationToken)
     {
-        int declines = await _readRepository.CountRecentDeclinedAttemptsAsync(
+        int declines = await _payments.CountRecentDeclinedAttemptsAsync(
             payment.CardBin,
             payment.CardLast4,
             Window,
