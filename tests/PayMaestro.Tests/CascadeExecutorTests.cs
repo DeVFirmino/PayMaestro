@@ -1,23 +1,24 @@
-using PayMaestro.Application.Services;
+using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
+using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
 
-public class CascadeExecutorTests
+public sealed class CascadeExecutorTests
 {
     private readonly CascadeExecutor _cascade = new();
 
     [Fact]
-    public async Task Approves_on_first_gateway_and_stops()
+    public async Task ShouldCaptureAndStopWhenFirstGatewayApproves()
     {
-        var payment = ReservedPayment();
-        var route = Route(
-            new FakeGateway("A", GatewayResultType.Approved),
-            new FakeGateway("B", GatewayResultType.Approved));
+        Payment payment = new PaymentBuilder().BuildReserved();
+        IReadOnlyList<IPaymentGateway> route = Route(
+            new FixedResultGateway("A", GatewayResultType.Approved),
+            new FixedResultGateway("B", GatewayResultType.Approved));
 
-        await _cascade.ExecuteAsync(payment, route);
+        await _cascade.ExecuteAsync(payment, route, CancellationToken.None);
 
         Assert.Equal(PaymentStatus.Captured, payment.Status);
         Assert.Single(payment.Attempts);
@@ -25,14 +26,14 @@ public class CascadeExecutorTests
     }
 
     [Fact]
-    public async Task Soft_decline_cascades_to_next_gateway()
+    public async Task ShouldCascadeToNextGatewayWhenFirstSoftDeclines()
     {
-        var payment = ReservedPayment();
-        var route = Route(
-            new FakeGateway("A", GatewayResultType.SoftDecline),
-            new FakeGateway("B", GatewayResultType.Approved));
+        Payment payment = new PaymentBuilder().BuildReserved();
+        IReadOnlyList<IPaymentGateway> route = Route(
+            new FixedResultGateway("A", GatewayResultType.SoftDecline),
+            new FixedResultGateway("B", GatewayResultType.Approved));
 
-        await _cascade.ExecuteAsync(payment, route);
+        await _cascade.ExecuteAsync(payment, route, CancellationToken.None);
 
         Assert.Equal(PaymentStatus.Captured, payment.Status);
         Assert.Equal(2, payment.Attempts.Count);
@@ -40,13 +41,15 @@ public class CascadeExecutorTests
     }
 
     [Fact]
-    public async Task Hard_decline_stops_the_cascade_immediately()
+    public async Task ShouldStopImmediatelyWhenGatewayHardDeclines()
     {
-        var payment = ReservedPayment();
-        var secondGateway = new FakeGateway("B", GatewayResultType.Approved);
-        var route = Route(new FakeGateway("A", GatewayResultType.HardDecline), secondGateway);
+        Payment payment = new PaymentBuilder().BuildReserved();
+        FixedResultGateway secondGateway = new("B", GatewayResultType.Approved);
+        IReadOnlyList<IPaymentGateway> route = Route(
+            new FixedResultGateway("A", GatewayResultType.HardDecline),
+            secondGateway);
 
-        await _cascade.ExecuteAsync(payment, route);
+        await _cascade.ExecuteAsync(payment, route, CancellationToken.None);
 
         Assert.Equal(PaymentStatus.Declined, payment.Status);
         Assert.Single(payment.Attempts);
@@ -54,40 +57,42 @@ public class CascadeExecutorTests
     }
 
     [Fact]
-    public async Task Declines_when_every_gateway_soft_declines()
+    public async Task ShouldDeclineWhenEveryGatewaySoftDeclinesOrErrors()
     {
-        var payment = ReservedPayment();
-        var route = Route(
-            new FakeGateway("A", GatewayResultType.SoftDecline),
-            new FakeGateway("B", GatewayResultType.Error));
+        Payment payment = new PaymentBuilder().BuildReserved();
+        IReadOnlyList<IPaymentGateway> route = Route(
+            new FixedResultGateway("A", GatewayResultType.SoftDecline),
+            new FixedResultGateway("B", GatewayResultType.Error));
 
-        await _cascade.ExecuteAsync(payment, route);
+        await _cascade.ExecuteAsync(payment, route, CancellationToken.None);
 
         Assert.Equal(PaymentStatus.Declined, payment.Status);
         Assert.Equal(2, payment.Attempts.Count);
     }
 
     [Fact]
-    public async Task An_unknown_outcome_stops_the_cascade_and_waits_for_reconciliation()
+    public async Task ShouldWaitForReconciliationWhenOutcomeIsUnknown()
     {
-        var payment = ReservedPayment();
-        var secondGateway = new FakeGateway("B", GatewayResultType.Approved);
-        var route = Route(new FakeGateway("A", GatewayResultType.Uncertain), secondGateway);
+        Payment payment = new PaymentBuilder().BuildReserved();
+        FixedResultGateway secondGateway = new("B", GatewayResultType.Approved);
+        IReadOnlyList<IPaymentGateway> route = Route(
+            new FixedResultGateway("A", GatewayResultType.Uncertain),
+            secondGateway);
 
-        await _cascade.ExecuteAsync(payment, route);
+        await _cascade.ExecuteAsync(payment, route, CancellationToken.None);
 
         Assert.Equal(PaymentStatus.RequiresReconciliation, payment.Status);
         Assert.False(secondGateway.WasCalled);   // the first acquirer may already hold the money
     }
 
     [Fact]
-    public async Task A_gateway_that_throws_is_recorded_as_an_unknown_outcome()
+    public async Task ShouldRecordUnknownOutcomeWhenGatewayThrows()
     {
-        var payment = ReservedPayment();
-        var secondGateway = new FakeGateway("B", GatewayResultType.Approved);
-        var route = Route(new ThrowingGateway("A"), secondGateway);
+        Payment payment = new PaymentBuilder().BuildReserved();
+        FixedResultGateway secondGateway = new("B", GatewayResultType.Approved);
+        IReadOnlyList<IPaymentGateway> route = Route(new ThrowingGateway("A"), secondGateway);
 
-        await _cascade.ExecuteAsync(payment, route);
+        await _cascade.ExecuteAsync(payment, route, CancellationToken.None);
 
         Assert.Equal(PaymentStatus.RequiresReconciliation, payment.Status);
         Assert.Equal(GatewayResultType.Uncertain, payment.Attempts[0].ResultType);
@@ -95,57 +100,18 @@ public class CascadeExecutorTests
     }
 
     [Fact]
-    public async Task Each_attempt_carries_the_key_presented_to_its_gateway()
+    public async Task ShouldRecordProviderKeyWhenEachGatewayIsAttempted()
     {
-        var payment = ReservedPayment();
-        var route = Route(
-            new FakeGateway("A", GatewayResultType.SoftDecline),
-            new FakeGateway("B", GatewayResultType.Approved));
+        Payment payment = new PaymentBuilder().BuildReserved();
+        IReadOnlyList<IPaymentGateway> route = Route(
+            new FixedResultGateway("A", GatewayResultType.SoftDecline),
+            new FixedResultGateway("B", GatewayResultType.Approved));
 
-        await _cascade.ExecuteAsync(payment, route);
+        await _cascade.ExecuteAsync(payment, route, CancellationToken.None);
 
         Assert.Equal("key-1:A:1", payment.Attempts[0].ProviderIdempotencyKey);
         Assert.Equal("key-1:B:2", payment.Attempts[1].ProviderIdempotencyKey);
     }
 
-    private static Payment ReservedPayment()
-    {
-        var payment = Payment.Create(
-            idempotencyKey: "key-1", merchantReference: "ORDER-1", customerId: "cust-1",
-            amount: 100m, currency: "EUR", cardBin: "411111", cardLast4: "7777",
-            cardCountry: "MT", customerIp: "203.0.113.10", ipCountry: "MT");
-
-        payment.BeginProcessing();   // the cascade only ever runs on a reserved payment
-        return payment;
-    }
-
-    private static List<IPaymentGateway> Route(params IPaymentGateway[] gateways) => [.. gateways];
-
-    private class FakeGateway(string name, GatewayResultType result) : IPaymentGateway
-    {
-        public string Name => name;
-        public bool WasCalled { get; private set; }
-
-        public Task<GatewayResult> ProcessAsync(
-            Payment payment, string providerIdempotencyKey, CancellationToken ct = default)
-        {
-            WasCalled = true;
-            return Task.FromResult(new GatewayResult(result, "00", result.ToString()));
-        }
-
-        public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken ct = default)
-            => Task.FromResult(new GatewayResult(result, "00", result.ToString()));
-    }
-
-    private class ThrowingGateway(string name) : IPaymentGateway
-    {
-        public string Name => name;
-
-        public Task<GatewayResult> ProcessAsync(
-            Payment payment, string providerIdempotencyKey, CancellationToken ct = default)
-            => throw new TimeoutException("The gateway never answered.");
-
-        public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken ct = default)
-            => Task.FromResult(new GatewayResult(GatewayResultType.Uncertain, "unknown", "Still unknown."));
-    }
+    private static IReadOnlyList<IPaymentGateway> Route(params IPaymentGateway[] gateways) => [.. gateways];
 }

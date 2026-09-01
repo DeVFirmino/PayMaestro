@@ -4,5 +4,6 @@ namespace PayMaestro.Application.UseCases.Payments.GetPaymentById;
 
 public interface IGetPaymentByIdUseCase
 {
-    public Task<PaymentResponse?> Execute(Guid paymentId, CancellationToken cancellationToken = default);
+    /// <summary>Returns null when no payment has this id; the endpoint answers an empty 404.</summary>
+    Task<PaymentResponse?> Execute(Guid paymentId, CancellationToken cancellationToken);
 }

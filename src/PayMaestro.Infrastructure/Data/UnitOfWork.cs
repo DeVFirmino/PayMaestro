@@ -7,6 +7,8 @@ namespace PayMaestro.Infrastructure.Data;
 
 public sealed class UnitOfWork : IUnitOfWork
 {
+    private const int SqliteConstraintErrorCode = 19;
+
     private readonly PayMaestroDbContext _context;
 
     public UnitOfWork(PayMaestroDbContext context)
@@ -20,19 +22,17 @@ public sealed class UnitOfWork : IUnitOfWork
         {
             await _context.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (DbUpdateConcurrencyException exception)
         {
             // The payment's concurrency stamp moved: another writer settled it first.
-            throw new ConcurrentPaymentModificationException();
+            throw new ConcurrentPaymentModificationException(exception);
         }
         catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
         {
-            // Lets callers detect races on unique keys (e.g. two concurrent
-            // requests with the same idempotency key) without referencing EF.
-            throw new UniqueConstraintViolationException();
+            throw new UniqueConstraintViolationException(exception);
         }
     }
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
-        => exception.InnerException is SqliteException { SqliteErrorCode: 19 }; // SQLITE_CONSTRAINT
+        => exception.InnerException is SqliteException { SqliteErrorCode: SqliteConstraintErrorCode };
 }

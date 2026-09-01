@@ -6,20 +6,22 @@ namespace PayMaestro.Application.Contracts;
 public sealed record CreatePaymentRequest
 {
     [Required]
-    public required string MerchantReference { get; init; }
+    public string MerchantReference { get; init; } = string.Empty;
 
     [Required]
-    public required string CustomerId { get; init; }
+    public string CustomerId { get; init; } = string.Empty;
 
     [Range(0.01, 1_000_000)]
-    public required decimal Amount { get; init; }
-
-    [Required, StringLength(3, MinimumLength = 3)]
-    public required string Currency { get; init; }
-
-    [Required, StringLength(19, MinimumLength = 13)]
-    public required string CardNumber { get; init; }
+    public decimal Amount { get; init; }
 
     [Required]
-    public required string CustomerIp { get; init; }
+    [StringLength(3, MinimumLength = 3)]
+    public string Currency { get; init; } = string.Empty;
+
+    [Required]
+    [StringLength(19, MinimumLength = 13)]
+    public string CardNumber { get; init; } = string.Empty;
+
+    [Required]
+    public string CustomerIp { get; init; } = string.Empty;
 }

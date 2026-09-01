@@ -11,8 +11,18 @@ namespace PayMaestro.Infrastructure.PaymentGateways;
 /// </summary>
 public abstract class MockGateway : IPaymentGateway
 {
+    /// <summary>Test card every mock acquirer treats as stolen: a hard decline, never retried elsewhere.</summary>
+    protected const string StolenCard = "0000";
+
     /// <summary>Test card whose charge succeeds at the provider but never answers the caller.</summary>
     protected const string UnansweredCard = "9999";
+
+    protected static readonly GatewayResult Approved = new(GatewayResultType.Approved, "00");
+    protected static readonly GatewayResult StolenCardDecline = new(GatewayResultType.HardDecline, "43");
+    protected static readonly GatewayResult InsufficientFunds = new(GatewayResultType.SoftDecline, "51");
+    protected static readonly GatewayResult ProviderUnavailable = new(GatewayResultType.Error, "96");
+
+    private static readonly GatewayResult NotFound = new(GatewayResultType.Error, "not_found");
 
     private readonly MockProviderLedger _ledger;
 
@@ -25,14 +35,14 @@ public abstract class MockGateway : IPaymentGateway
 
     protected abstract TimeSpan Latency { get; }
 
-    protected abstract GatewayResult Decide(Payment payment);
-
     public async Task<GatewayResult> ProcessAsync(
-        Payment payment, string providerIdempotencyKey, CancellationToken cancellationToken = default)
+        Payment payment,
+        string providerIdempotencyKey,
+        CancellationToken cancellationToken)
     {
         if (_ledger.Find(providerIdempotencyKey) is { } alreadySettled)
         {
-            return alreadySettled; // the provider recognises the key: no second charge
+            return alreadySettled;          // the provider recognises the key: no second charge
         }
 
         await Task.Delay(Latency, cancellationToken);
@@ -47,7 +57,10 @@ public abstract class MockGateway : IPaymentGateway
         return settled;
     }
 
-    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken = default)
-        => Task.FromResult(_ledger.Find(providerIdempotencyKey)
-            ?? new GatewayResult(GatewayResultType.Error, "not_found", "The provider holds no record for this key."));
+    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
+        => Task.FromResult(_ledger.Find(providerIdempotencyKey) ?? NotFound);
+
+    /// <summary>Every mock declines the stolen test card and approves anything it has no rule for.</summary>
+    protected virtual GatewayResult Decide(Payment payment)
+        => payment.CardLast4 == StolenCard ? StolenCardDecline : Approved;
 }
