@@ -1,6 +1,6 @@
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Fraud;
-using PayMaestro.Domain.Repositories.PaymentRepository;
+using PayMaestro.Domain.Repositories.Payments;
 
 namespace PayMaestro.Application.Fraud;
 
@@ -9,16 +9,27 @@ namespace PayMaestro.Application.Fraud;
 /// stolen-card probing pattern, where a fraudster retries a card until
 /// something goes through.
 /// </summary>
-public class DeclineVelocityRule(IPaymentReadOnlyRepository readRepo) : IFraudRule
+public sealed class DeclineVelocityRule : IFraudRule
 {
     private const int MaxRecentDeclines = 3;
     private static readonly TimeSpan Window = TimeSpan.FromHours(24);
 
+    private readonly IPaymentReadOnlyRepository _payments;
+
+    public DeclineVelocityRule(IPaymentReadOnlyRepository payments)
+    {
+        _payments = payments;
+    }
+
     public string RuleName => "DeclineVelocity";
 
-    public async Task<FraudVerdict> EvaluateAsync(Payment payment, CancellationToken ct = default)
+    public async Task<FraudVerdict> EvaluateAsync(Payment payment, CancellationToken cancellationToken)
     {
-        var declines = await readRepo.CountRecentDeclinedAttempts(payment.CardBin, payment.CardLast4, Window);
+        int declines = await _payments.CountRecentDeclinedAttemptsAsync(
+            payment.CardBin,
+            payment.CardLast4,
+            Window,
+            cancellationToken);
 
         return declines >= MaxRecentDeclines
             ? FraudVerdict.Suspicious($"Card reached {declines} declined attempts within {Window.TotalHours}h.")

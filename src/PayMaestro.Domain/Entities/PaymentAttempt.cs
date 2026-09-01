@@ -2,11 +2,16 @@ using PayMaestro.Domain.Enums;
 
 namespace PayMaestro.Domain.Entities;
 
-public class PaymentAttempt : EntityBase
+public sealed class PaymentAttempt : EntityBase
 {
+    // EF Core materialises the entity through the private constructor and sets every
+    // property afterwards, so the null-forgiving defaults never reach a caller.
     public Guid PaymentId { get; private set; }
+
     public string GatewayName { get; private set; } = null!;
+
     public int AttemptOrder { get; private set; }
+
     public GatewayResultType ResultType { get; private set; }
 
     /// <summary>
@@ -17,13 +22,21 @@ public class PaymentAttempt : EntityBase
     public string ProviderIdempotencyKey { get; private set; } = null!;
 
     public string GatewayResponseCode { get; private set; } = null!;
+
     public int DurationMs { get; private set; }
 
-    private PaymentAttempt() { }
+    private PaymentAttempt()
+    {
+    }
 
-    public static PaymentAttempt Create(Guid paymentId, string gatewayName,
-        int attemptOrder, GatewayResultType resultType, string gatewayResponseCode,
-        int durationMs, string providerIdempotencyKey) => new()
+    public static PaymentAttempt Create(
+        Guid paymentId,
+        string gatewayName,
+        int attemptOrder,
+        GatewayResultType resultType,
+        string gatewayResponseCode,
+        int durationMs,
+        string providerIdempotencyKey) => new()
         {
             PaymentId = paymentId,
             GatewayName = gatewayName,
@@ -31,6 +44,6 @@ public class PaymentAttempt : EntityBase
             ResultType = resultType,
             GatewayResponseCode = gatewayResponseCode,
             DurationMs = durationMs,
-            ProviderIdempotencyKey = providerIdempotencyKey
+            ProviderIdempotencyKey = providerIdempotencyKey,
         };
 }

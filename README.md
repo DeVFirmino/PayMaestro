@@ -41,11 +41,11 @@ Card ending `1111` is soft-declined by AlphaPay — a *recoverable* failure — 
 
 **Audit-first persistence.** Every gateway attempt (gateway, order, result code, duration) and every fraud flag is persisted, and deletes are restricted at the database level — payment records are treated as regulatory evidence. If an acquirer issues an RFI, `GET /api/payments/{id}` returns the evidence pack. PCI-aware by design: only the BIN and last four digits are ever stored, never the full PAN.
 
-**One class per reason to change.** The orchestrator coordinates the pipeline; `CascadeExecutor` owns the retry policy; each fraud rule and each gateway implements a single Domain contract (dependency inversion — the Domain has zero external references).
+**One class per reason to change.** `CreatePaymentUseCase` runs the pipeline; `GatewayRouter` picks the eligible gateways; `CascadeExecutor` owns the retry policy; each fraud rule and each gateway implements a single Domain contract (dependency inversion — the Domain has zero external references).
 
 ## Architecture
 
-Clean Architecture, modular monolith: `API → Application → Domain ← Infrastructure`. The Domain holds entities, the state machine and all contracts (gateways, fraud rules, repositories with read/write/update segregation and a unit of work); the Infrastructure implements them (EF Core + SQLite, mock gateways); the Application orchestrates use cases.
+Clean Architecture, modular monolith: `API → Application → Domain ← Infrastructure`. The Domain holds entities, the state machine and all contracts (gateways, fraud rules, repositories with read/write segregation and a unit of work); the Infrastructure implements them (EF Core + SQLite, mock gateways); the Application holds the use cases, one class per operation.
 
 The behaviour that matters is covered by xUnit tests — the cascade policy (approve, cascade, hard-stop) and the payment state machine:
 

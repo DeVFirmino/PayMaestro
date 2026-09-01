@@ -1,19 +1,21 @@
 using PayMaestro.Domain.Entities;
-using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
 
 namespace PayMaestro.Infrastructure.PaymentGateways;
 
-public class AlphaPayGateway(MockProviderLedger ledger) : MockGateway(ledger)
+public sealed class AlphaPayGateway : MockGateway
 {
+    private const string InsufficientFundsCard = "1111";
+
+    public AlphaPayGateway(MockProviderLedger ledger)
+        : base(ledger)
+    {
+    }
+
     public override string Name => "AlphaPay";
 
     protected override TimeSpan Latency => TimeSpan.FromMilliseconds(150);
 
-    protected override GatewayResult Decide(Payment payment) => payment.CardLast4 switch
-    {
-        "0000" => new(GatewayResultType.HardDecline, "43", "Stolen card"),
-        "1111" => new(GatewayResultType.SoftDecline, "51", "Insufficient funds"),
-        _ => new(GatewayResultType.Approved, "00", "Approved")
-    };
+    protected override GatewayResult Decide(Payment payment)
+        => payment.CardLast4 == InsufficientFundsCard ? InsufficientFunds : base.Decide(payment);
 }
