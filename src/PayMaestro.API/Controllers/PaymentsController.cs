@@ -32,12 +32,8 @@ public sealed class PaymentsController : ControllerBase
         [FromBody] CreatePaymentRequest request,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(idempotencyKey))
-        {
-            return BadRequest(new ErrorResponse { Error = "Idempotency-Key header is required." });
-        }
-
         PaymentResponse response = await useCase.Execute(idempotencyKey, request, cancellationToken);
+
         return Ok(response);
     }
 
@@ -59,7 +55,11 @@ public sealed class PaymentsController : ControllerBase
         [FromServices] IReconcilePaymentUseCase useCase,
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
-        => Ok(await useCase.Execute(id, cancellationToken));
+    {
+        PaymentResponse response = await useCase.Execute(id, cancellationToken);
+
+        return Ok(response);
+    }
 
     /// <summary>Gets a payment by id, including its gateway attempt history.</summary>
     /// <response code="200">The payment was found.</response>
@@ -73,6 +73,7 @@ public sealed class PaymentsController : ControllerBase
         CancellationToken cancellationToken)
     {
         PaymentResponse? response = await useCase.Execute(id, cancellationToken);
+
         return response is null ? NotFound() : Ok(response);
     }
 }

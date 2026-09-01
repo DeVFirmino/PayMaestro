@@ -8,8 +8,9 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Pay
     public PayMaestroDbContext CreateDbContext(string[] args)
     {
         DbContextOptions<PayMaestroDbContext> options = new DbContextOptionsBuilder<PayMaestroDbContext>()
-            .UseSqlite("Data Source=paymaestro.db")
+            .UseSqlite(DependencyInjectionExtension.DefaultConnectionString)
             .Options;
+
         return new PayMaestroDbContext(options);
     }
 }
