@@ -1,14 +1,13 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using PayMaestro.Application.Contracts;
 using PayMaestro.Application.Options;
-using PayMaestro.Application.Services;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
+using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
-using PayMaestro.Domain.Repositories.PaymentRepository;
+using PayMaestro.Domain.Repositories.Payments;
 using PayMaestro.Infrastructure.Data;
 using PayMaestro.Infrastructure.Data.Repositories;
 
@@ -34,32 +33,60 @@ public sealed class PaymentDatabase : IDisposable
             .UseSqlite($"Data Source={_path}")
             .Options);
 
-    public CreatePaymentUseCase NewOrchestrator(
+    public CreatePaymentUseCase NewCreatePaymentUseCase(
         PayMaestroDbContext context,
-        IPaymentReadOnlyRepository? readRepo = null,
+        IPaymentReadOnlyRepository? reader = null,
         IEnumerable<IFraudRule>? fraudRules = null,
         params IPaymentGateway[] gateways)
     {
         PaymentRepository repository = new(context);
 
         return new CreatePaymentUseCase(
-            readRepo ?? repository, repository, new UnitOfWork(context),
-            gateways, fraudRules ?? [], Routing(gateways), new CascadeExecutor());
+            reader ?? repository,
+            repository,
+            new UnitOfWork(context),
+            fraudRules ?? [],
+            new GatewayRouter(Routing(gateways), gateways),
+            new CascadeExecutor());
     }
 
-    public ReconcilePaymentUseCase NewReconciler(PayMaestroDbContext context, params IPaymentGateway[] gateways)
+    public ReconcilePaymentUseCase NewReconcilePaymentUseCase(
+        PayMaestroDbContext context,
+        params IPaymentGateway[] gateways)
         => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
 
-    public static CreatePaymentRequest Request(decimal amount = 100m, string cardNumber = "4111111111117777")
-        => new()
-        {
-            MerchantReference = "ORDER-1",
-            CustomerId = "cust-1",
-            Amount = amount,
-            Currency = "EUR",
-            CardNumber = cardNumber,
-            CustomerIp = "203.0.113.10"
-        };
+    /// <summary>Reads committed state only, on a connection of its own.</summary>
+    public Payment? FindCommittedByKey(string idempotencyKey)
+    {
+        using PayMaestroDbContext observer = NewContext();
+
+        return observer.Payments.AsNoTracking()
+            .FirstOrDefault(payment => payment.IdempotencyKey == idempotencyKey);
+    }
+
+    public async Task<int> CountPaymentsWithKeyAsync(string idempotencyKey)
+    {
+        using PayMaestroDbContext context = NewContext();
+
+        return await context.Payments.CountAsync(payment => payment.IdempotencyKey == idempotencyKey);
+    }
+
+    public async Task<PaymentAttempt> SingleAttemptOfAsync(Guid paymentId)
+    {
+        using PayMaestroDbContext context = NewContext();
+
+        return await context.PaymentAttempts.SingleAsync(attempt => attempt.PaymentId == paymentId);
+    }
+
+    /// <summary>Loads the payment into the given context, so that context now holds its current stamp.</summary>
+    public static Task<Payment> LoadIntoAsync(PayMaestroDbContext context, Guid paymentId)
+        => context.Payments.Include(payment => payment.Attempts).FirstAsync(payment => payment.Id == paymentId);
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();   // release the file handle before deleting it
+        File.Delete(_path);
+    }
 
     private static IOptions<GatewayRoutingOptions> Routing(IPaymentGateway[] gateways)
         => Options.Create(new GatewayRoutingOptions
@@ -69,13 +96,7 @@ public sealed class PaymentDatabase : IDisposable
                 Name = gateway.Name,
                 Priority = index,
                 SupportedCurrencies = ["EUR"],
-                MaxAmount = 1_000_000m
-            })]
+                MaxAmount = 1_000_000m,
+            })],
         });
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools(); // release the file handle before deleting it
-        File.Delete(_path);
-    }
 }

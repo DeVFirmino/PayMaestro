@@ -9,40 +9,57 @@ namespace PayMaestro.Tests.Support;
 /// A gateway that counts how many times money actually moved and honours the provider-side
 /// idempotency contract, so a test can assert "two requests, one charge" instead of trusting it.
 /// </summary>
-public sealed class TestGateway(string name, Func<Task>? whileCharging = null, bool answers = true) : IPaymentGateway
+public sealed class TestGateway : IPaymentGateway
 {
+    private static readonly GatewayResult Approved = new(GatewayResultType.Approved, "00");
+    private static readonly GatewayResult NotFound = new(GatewayResultType.Error, "not_found");
+
     private readonly ConcurrentDictionary<string, GatewayResult> _settled = new();
+    private readonly Func<Task>? _whileCharging;
+    private readonly bool _answers;
     private int _charges;
+
+    public TestGateway(string name, Func<Task>? whileCharging = null, bool answers = true)
+    {
+        Name = name;
+        _whileCharging = whileCharging;
+        _answers = answers;
+    }
+
+    public string Name { get; }
 
     /// <summary>How many charges the provider actually accepted.</summary>
     public int Charges => Volatile.Read(ref _charges);
-
-    public string Name => name;
 
     /// <summary>A gateway that settles the charge and then fails to answer, like a timeout.</summary>
     public static TestGateway Unanswering(string name) => new(name, answers: false);
 
     public async Task<GatewayResult> ProcessAsync(
-        Payment payment, string providerIdempotencyKey, CancellationToken ct = default)
+        Payment payment,
+        string providerIdempotencyKey,
+        CancellationToken cancellationToken)
     {
-        if (_settled.TryGetValue(providerIdempotencyKey, out var alreadySettled))
-            return alreadySettled;              // recognised key: no second charge
+        if (_settled.TryGetValue(providerIdempotencyKey, out GatewayResult? alreadySettled))
+        {
+            return alreadySettled;          // recognised key: no second charge
+        }
 
-        if (whileCharging is not null)
-            await whileCharging();
+        if (_whileCharging is not null)
+        {
+            await _whileCharging();
+        }
 
         Interlocked.Increment(ref _charges);
-        var result = new GatewayResult(GatewayResultType.Approved, "00", "Approved");
-        _settled[providerIdempotencyKey] = result;
+        _settled[providerIdempotencyKey] = Approved;
 
-        if (!answers)
-            throw new TimeoutException($"{name} took the charge but never answered.");
+        if (_answers is false)
+        {
+            throw new TimeoutException($"{Name} took the charge but never answered.");
+        }
 
-        return result;
+        return Approved;
     }
 
-    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken ct = default)
-        => Task.FromResult(_settled.TryGetValue(providerIdempotencyKey, out var settled)
-            ? settled
-            : new GatewayResult(GatewayResultType.Error, "not_found", "The provider holds no record for this key."));
+    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
+        => Task.FromResult(_settled.TryGetValue(providerIdempotencyKey, out GatewayResult? settled) ? settled : NotFound);
 }

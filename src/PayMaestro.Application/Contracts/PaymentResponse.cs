@@ -17,5 +17,5 @@ public sealed record PaymentResponse
 
     public required DateTime CreatedAt { get; init; }
 
-    public required List<PaymentAttemptResponse> Attempts { get; init; }
+    public required IReadOnlyList<PaymentAttemptResponse> Attempts { get; init; }
 }

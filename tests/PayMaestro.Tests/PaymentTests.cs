@@ -1,19 +1,20 @@
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
+using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
 
-public class PaymentTests
+public sealed class PaymentTests
 {
     [Fact]
-    public void New_payment_starts_pending()
-        => Assert.Equal(PaymentStatus.Pending, NewPayment().Status);
+    public void ShouldStartPendingWhenCreated()
+        => Assert.Equal(PaymentStatus.Pending, new PaymentBuilder().Build().Status);
 
     [Fact]
-    public void Reserving_the_key_moves_the_payment_to_processing()
+    public void ShouldMoveToProcessingWhenKeyIsReserved()
     {
-        var payment = NewPayment();
+        Payment payment = new PaymentBuilder().Build();
 
         payment.BeginProcessing();
 
@@ -21,13 +22,13 @@ public class PaymentTests
     }
 
     [Fact]
-    public void A_payment_cannot_be_authorized_before_its_key_is_reserved()
-        => Assert.Throws<InvalidStateTransitionException>(NewPayment().Authorize);
+    public void ShouldRejectAuthorizationWhenKeyIsNotReserved()
+        => Assert.Throws<InvalidStateTransitionException>(new PaymentBuilder().Build().Authorize);
 
     [Fact]
-    public void Authorize_then_capture_is_the_happy_path()
+    public void ShouldCaptureWhenAuthorizedFirst()
     {
-        var payment = ReservedPayment();
+        Payment payment = new PaymentBuilder().BuildReserved();
 
         payment.Authorize();
         payment.Capture();
@@ -36,28 +37,26 @@ public class PaymentTests
     }
 
     [Fact]
-    public void Capture_without_authorization_is_rejected()
-        => Assert.Throws<InvalidStateTransitionException>(ReservedPayment().Capture);
+    public void ShouldRejectCaptureWhenNotAuthorized()
+        => Assert.Throws<InvalidStateTransitionException>(new PaymentBuilder().BuildReserved().Capture);
 
     [Fact]
-    public void Captured_payment_cannot_be_declined()
+    public void ShouldRejectDeclineWhenAlreadyCaptured()
     {
-        var payment = ReservedPayment();
-        payment.Authorize();
-        payment.Capture();
+        Payment payment = new PaymentBuilder().BuildReserved();
+        payment.AuthorizeAndCapture();
 
         Assert.Throws<InvalidStateTransitionException>(payment.Decline);
     }
 
     [Fact]
-    public void An_unknown_outcome_can_be_settled_either_way_once_the_provider_answers()
+    public void ShouldSettleEitherWayWhenProviderAnswersUnknownOutcome()
     {
-        var captured = ReservedPayment();
+        Payment captured = new PaymentBuilder().BuildReserved();
         captured.MarkForReconciliation();
-        captured.Authorize();
-        captured.Capture();
+        captured.AuthorizeAndCapture();
 
-        var declined = ReservedPayment();
+        Payment declined = new PaymentBuilder().BuildReserved();
         declined.MarkForReconciliation();
         declined.Decline();
 
@@ -66,19 +65,19 @@ public class PaymentTests
     }
 
     [Fact]
-    public void A_settled_payment_cannot_be_sent_back_for_reconciliation()
+    public void ShouldRejectReconciliationWhenAlreadySettled()
     {
-        var payment = ReservedPayment();
+        Payment payment = new PaymentBuilder().BuildReserved();
         payment.Decline();
 
         Assert.Throws<InvalidStateTransitionException>(payment.MarkForReconciliation);
     }
 
     [Fact]
-    public void Every_transition_moves_the_concurrency_stamp()
+    public void ShouldRotateConcurrencyStampWhenStateChanges()
     {
-        var payment = ReservedPayment();
-        var beforeAuthorize = payment.ConcurrencyStamp;
+        Payment payment = new PaymentBuilder().BuildReserved();
+        Guid beforeAuthorize = payment.ConcurrencyStamp;
 
         payment.Authorize();
 
@@ -86,9 +85,9 @@ public class PaymentTests
     }
 
     [Fact]
-    public void Fraud_rejection_records_the_triggered_rule()
+    public void ShouldRecordTriggeredRuleWhenRejectedAsFraud()
     {
-        var payment = ReservedPayment();
+        Payment payment = new PaymentBuilder().BuildReserved();
 
         payment.AddFraudFlag(FraudFlag.Create(payment.Id, "DeclineVelocity", "3 declines in 24h"));
         payment.RejectAsFraud();
@@ -101,19 +100,11 @@ public class PaymentTests
     [Theory]
     [InlineData(0)]
     [InlineData(-10)]
-    public void Amount_must_be_positive(decimal amount)
-        => Assert.Throws<ArgumentException>(() => Payment.Create(
-            "key", "ref", "cust", amount, "EUR", "411111", "7777", "MT", "203.0.113.10", "MT"));
-
-    private static Payment NewPayment() => Payment.Create(
-        idempotencyKey: "key-1", merchantReference: "ORDER-1", customerId: "cust-1",
-        amount: 100m, currency: "EUR", cardBin: "411111", cardLast4: "7777",
-        cardCountry: "MT", customerIp: "203.0.113.10", ipCountry: "MT");
-
-    private static Payment ReservedPayment()
+    public void ShouldRejectCreationWhenAmountIsNotPositive(decimal amount)
     {
-        var payment = NewPayment();
-        payment.BeginProcessing();
-        return payment;
+        ValidationFailedException exception = Assert.Throws<ValidationFailedException>(
+            () => new PaymentBuilder().WithAmount(amount).Build());
+
+        Assert.Equal(ErrorMessages.AmountMustBePositive, exception.Message);
     }
 }
