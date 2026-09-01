@@ -1,5 +1,5 @@
 using PayMaestro.Domain.Entities;
-using PayMaestro.Domain.Repositories.PaymentRepository;
+using PayMaestro.Domain.Repositories.Payments;
 
 namespace PayMaestro.Tests.Support;
 
@@ -8,29 +8,44 @@ namespace PayMaestro.Tests.Support;
 /// race deterministically: both requests look the key up, find nothing, and only then race to
 /// insert it. Later lookups (the one that finds the winner) pass straight through.
 /// </summary>
-public sealed class GatedReadRepository(
-    IPaymentReadOnlyRepository inner,
-    TaskCompletionSource hasRead,
-    TaskCompletionSource release) : IPaymentReadOnlyRepository
+public sealed class GatedReadRepository : IPaymentReadOnlyRepository
 {
+    private readonly IPaymentReadOnlyRepository _inner;
+    private readonly TaskCompletionSource _hasRead;
+    private readonly TaskCompletionSource _release;
     private bool _held;
 
-    public async Task<Payment?> GetByIdempotencyKey(string idempotencyKey)
+    public GatedReadRepository(
+        IPaymentReadOnlyRepository inner,
+        TaskCompletionSource hasRead,
+        TaskCompletionSource release)
     {
-        var result = await inner.GetByIdempotencyKey(idempotencyKey);
+        _inner = inner;
+        _hasRead = hasRead;
+        _release = release;
+    }
 
-        if (!_held)
+    public async Task<Payment?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken)
+    {
+        Payment? result = await _inner.GetByIdempotencyKeyAsync(idempotencyKey, cancellationToken);
+
+        if (_held is false)
         {
             _held = true;
-            hasRead.TrySetResult();
-            await release.Task;
+            _hasRead.TrySetResult();
+            await _release.Task;
         }
 
         return result;
     }
 
-    public Task<Payment?> GetById(Guid id) => inner.GetById(id);
+    public Task<Payment?> GetByIdAsync(Guid paymentId, CancellationToken cancellationToken)
+        => _inner.GetByIdAsync(paymentId, cancellationToken);
 
-    public Task<int> CountRecentDeclinedAttempts(string cardBin, string cardLast4, TimeSpan window)
-        => inner.CountRecentDeclinedAttempts(cardBin, cardLast4, window);
+    public Task<int> CountRecentDeclinedAttemptsAsync(
+        string cardBin,
+        string cardLast4,
+        TimeSpan window,
+        CancellationToken cancellationToken)
+        => _inner.CountRecentDeclinedAttemptsAsync(cardBin, cardLast4, window, cancellationToken);
 }

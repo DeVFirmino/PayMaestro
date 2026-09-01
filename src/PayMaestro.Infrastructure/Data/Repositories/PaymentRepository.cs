@@ -1,38 +1,48 @@
 using Microsoft.EntityFrameworkCore;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
-using PayMaestro.Domain.Repositories.PaymentRepository;
-using PayMaestro.Infrastructure.Data;
+using PayMaestro.Domain.Repositories.Payments;
 
 namespace PayMaestro.Infrastructure.Data.Repositories;
 
-public class PaymentRepository(PayMaestroDbContext context) :
-    IPaymentReadOnlyRepository, IPaymentWriteOnlyRepository, IPaymentUpdateOnlyRepository
+public sealed class PaymentRepository : IPaymentReadOnlyRepository, IPaymentWriteOnlyRepository
 {
-    public async Task<Payment?> GetById(Guid id)
-        => await context.Payment
-            .Include(p => p.Attempts)
-            .Include(p => p.FraudFlags)
-            .FirstOrDefaultAsync(p => p.Id == id);
+    private readonly PayMaestroDbContext _context;
 
-    public async Task<Payment?> GetByIdempotencyKey(string idempotencyKey)
-        => await context.Payment
-            .Include(p => p.Attempts)
-            .Include(p => p.FraudFlags)
-            .FirstOrDefaultAsync(p => p.IdempotencyKey == idempotencyKey);
-
-    public async Task<int> CountRecentDeclinedAttempts(string cardBin, string cardLast4, TimeSpan window)
+    public PaymentRepository(PayMaestroDbContext context)
     {
-        var cutoff = DateTime.UtcNow - window;
-        return await context.Payment
-            .Where(p => p.CardBin == cardBin && p.CardLast4 == cardLast4)
-            .SelectMany(p => p.Attempts)
-            .CountAsync(a => a.CreatedAt >= cutoff
-                             && (a.ResultType == GatewayResultType.HardDecline
-                                 || a.ResultType == GatewayResultType.SoftDecline));
+        _context = context;
     }
 
-    public async Task Add(Payment payment) => await context.Payment.AddAsync(payment);
+    /// <summary>A payment is always loaded with its audit history: attempts and fraud flags.</summary>
+    private IQueryable<Payment> PaymentsWithHistory => _context.Payments
+        .Include(payment => payment.Attempts)
+        .Include(payment => payment.FraudFlags);
 
-    public void Update(Payment payment) => context.Payment.Update(payment);
+    public Task<Payment?> GetByIdAsync(Guid paymentId, CancellationToken cancellationToken)
+        => PaymentsWithHistory.FirstOrDefaultAsync(payment => payment.Id == paymentId, cancellationToken);
+
+    public Task<Payment?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken)
+        => PaymentsWithHistory.FirstOrDefaultAsync(payment => payment.IdempotencyKey == idempotencyKey, cancellationToken);
+
+    public Task<int> CountRecentDeclinedAttemptsAsync(
+        string cardBin,
+        string cardLast4,
+        TimeSpan window,
+        CancellationToken cancellationToken)
+    {
+        DateTime cutoff = DateTime.UtcNow - window;
+
+        return _context.Payments
+            .Where(payment => payment.CardBin == cardBin && payment.CardLast4 == cardLast4)
+            .SelectMany(payment => payment.Attempts)
+            .CountAsync(
+                attempt => attempt.CreatedAt >= cutoff
+                           && (attempt.ResultType == GatewayResultType.HardDecline
+                               || attempt.ResultType == GatewayResultType.SoftDecline),
+                cancellationToken);
+    }
+
+    public async Task AddAsync(Payment payment, CancellationToken cancellationToken)
+        => await _context.Payments.AddAsync(payment, cancellationToken);
 }

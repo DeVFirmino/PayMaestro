@@ -3,7 +3,7 @@ using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Gateways;
 
-namespace PayMaestro.Application.Services;
+namespace PayMaestro.Application.UseCases.Payments.CreatePayment;
 
 /// <summary>
 /// Tries each gateway in the route until one settles the payment.
@@ -14,21 +14,26 @@ namespace PayMaestro.Application.Services;
 /// first may have taken the money is exactly how a customer gets billed twice.
 /// Every attempt is recorded on the payment for auditing.
 /// </summary>
-public class CascadeExecutor
+public sealed class CascadeExecutor
 {
-    public async Task ExecuteAsync(Payment payment, IReadOnlyList<IPaymentGateway> route, CancellationToken ct = default)
-    {
-        var order = 1;
+    private const string NoResponseCode = "no_response";
 
-        foreach (var gateway in route)
+    public async Task ExecuteAsync(
+        Payment payment,
+        IReadOnlyList<IPaymentGateway> route,
+        CancellationToken cancellationToken)
+    {
+        int order = 1;
+
+        foreach (IPaymentGateway gateway in route)
         {
-            var result = await TryGateway(payment, gateway, order++, ct);
+            GatewayResult result = await ChargeThroughAsync(payment, gateway, order, cancellationToken);
+            order++;
 
             switch (result.ResultType)
             {
                 case GatewayResultType.Approved:
-                    payment.Authorize();
-                    payment.Capture();
+                    payment.AuthorizeAndCapture();
                     return;
 
                 case GatewayResultType.HardDecline:
@@ -44,30 +49,38 @@ public class CascadeExecutor
             }
         }
 
-        payment.Decline();       // routes exhausted
+        payment.Decline();      // routes exhausted
     }
 
-    private static async Task<GatewayResult> TryGateway(
-        Payment payment, IPaymentGateway gateway, int order, CancellationToken ct)
+    /// <summary>Charges the payment through one gateway and records the attempt, whatever the answer.</summary>
+    private static async Task<GatewayResult> ChargeThroughAsync(
+        Payment payment,
+        IPaymentGateway gateway,
+        int order,
+        CancellationToken cancellationToken)
     {
-        var providerKey = ProviderIdempotencyKey.For(payment, gateway.Name, order);
-        var start = Stopwatch.GetTimestamp();
+        string providerKey = ProviderIdempotencyKey.For(payment, gateway.Name, order);
+        long start = Stopwatch.GetTimestamp();
 
         GatewayResult result;
         try
         {
-            result = await gateway.ProcessAsync(payment, providerKey, ct);
+            result = await gateway.ProcessAsync(payment, providerKey, cancellationToken);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested is false)
         {
             // The call failed without an answer. Whether the provider charged is unknown,
             // so it is recorded as such instead of being treated as a clean failure.
-            result = new GatewayResult(GatewayResultType.Uncertain, "no_response", ex.Message);
+            result = new GatewayResult(GatewayResultType.Uncertain, NoResponseCode);
         }
 
         payment.RecordAttempt(PaymentAttempt.Create(
-            payment.Id, gateway.Name, order, result.ResultType,
-            result.ResponseCode, (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+            payment.Id,
+            gateway.Name,
+            order,
+            result.ResultType,
+            result.ResponseCode,
+            (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
             providerKey));
 
         return result;

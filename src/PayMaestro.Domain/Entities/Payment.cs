@@ -3,19 +3,39 @@ using PayMaestro.Domain.Exceptions;
 
 namespace PayMaestro.Domain.Entities;
 
-public class Payment : EntityBase
+public sealed class Payment : EntityBase
 {
+    /// <summary>Only the BIN and the last four digits are ever stored; the full PAN never is.</summary>
+    public const int CardBinLength = 6;
+
+    public const int CardLast4Length = 4;
+
+    private const int CurrencyCodeLength = 3;
+
+    // EF Core materialises the entity through the private constructor and sets every
+    // property afterwards, so the null-forgiving defaults never reach a caller.
     public string IdempotencyKey { get; private set; } = null!;
+
     public string MerchantReference { get; private set; } = null!;
+
     public string CustomerId { get; private set; } = null!;
+
     public decimal Amount { get; private set; }
+
     public string Currency { get; private set; } = null!;
+
     public string CardBin { get; private set; } = null!;
+
     public string CardLast4 { get; private set; } = null!;
+
     public string CardCountry { get; private set; } = null!;
+
     public string CustomerIp { get; private set; } = null!;
+
     public string IpCountry { get; private set; } = null!;
+
     public PaymentStatus Status { get; private set; }
+
     public DateTime UpdatedAt { get; private set; }
 
     /// <summary>
@@ -25,26 +45,42 @@ public class Payment : EntityBase
     public Guid ConcurrencyStamp { get; private set; } = Guid.NewGuid();
 
     public List<PaymentAttempt> Attempts { get; private set; } = [];
+
     public List<FraudFlag> FraudFlags { get; private set; } = [];
 
-    /// <summary>The outcome is settled: replaying this payment must never call a gateway again.</summary>
-    public bool IsTerminal => Status is PaymentStatus.Captured or PaymentStatus.Declined
-        or PaymentStatus.FraudRejected or PaymentStatus.Refunded;
+    /// <summary>The most recent gateway attempt, or null while no gateway has been contacted.</summary>
+    public PaymentAttempt? LastAttempt => Attempts.MaxBy(attempt => attempt.AttemptOrder);
 
-    private Payment() { } // EF Core
+    private Payment()
+    {
+    }
 
-    public static Payment Create(string idempotencyKey, string merchantReference,
-        string customerId, decimal amount, string currency, string cardBin,
-        string cardLast4, string cardCountry, string customerIp, string ipCountry)
+    public static Payment Create(
+        string idempotencyKey,
+        string merchantReference,
+        string customerId,
+        decimal amount,
+        string currency,
+        string cardBin,
+        string cardLast4,
+        string cardCountry,
+        string customerIp,
+        string ipCountry)
     {
         if (string.IsNullOrWhiteSpace(idempotencyKey))
-            throw new ArgumentException("Idempotency key is required.", nameof(idempotencyKey));
+        {
+            throw new ValidationFailedException(ErrorMessages.IdempotencyKeyRequired);
+        }
 
         if (amount <= 0)
-            throw new ArgumentException("Amount must be greater than zero.", nameof(amount));
+        {
+            throw new ValidationFailedException(ErrorMessages.AmountMustBePositive);
+        }
 
-        if (string.IsNullOrWhiteSpace(currency) || currency.Length != 3)
-            throw new ArgumentException("Currency must be a 3-letter ISO code.", nameof(currency));
+        if (string.IsNullOrWhiteSpace(currency) || currency.Length != CurrencyCodeLength)
+        {
+            throw new ValidationFailedException(ErrorMessages.CurrencyMustBeIsoCode);
+        }
 
         return new Payment
         {
@@ -59,7 +95,7 @@ public class Payment : EntityBase
             CustomerIp = customerIp,
             IpCountry = ipCountry,
             Status = PaymentStatus.Pending,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
         };
     }
 
@@ -69,23 +105,25 @@ public class Payment : EntityBase
     /// </summary>
     public void BeginProcessing()
     {
-        if (Status != PaymentStatus.Pending)
+        if (Status is not PaymentStatus.Pending)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Processing);
+        }
 
         Status = PaymentStatus.Processing;
-        Touch();
+        MarkModified();
     }
 
     public void RecordAttempt(PaymentAttempt attempt)
     {
         Attempts.Add(attempt);
-        Touch();
+        MarkModified();
     }
 
     public void AddFraudFlag(FraudFlag flag)
     {
         FraudFlags.Add(flag);
-        Touch();
+        MarkModified();
     }
 
     public void Authorize()
@@ -93,37 +131,55 @@ public class Payment : EntityBase
         // Reconciliation resolves an unknown outcome into the same settled states,
         // so it is a legal starting point as well as Processing.
         if (Status is not (PaymentStatus.Processing or PaymentStatus.RequiresReconciliation))
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Authorized);
+        }
 
         Status = PaymentStatus.Authorized;
-        Touch();
+        MarkModified();
     }
 
     public void Capture()
     {
-        if (Status != PaymentStatus.Authorized)
+        if (Status is not PaymentStatus.Authorized)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Captured);
+        }
 
         Status = PaymentStatus.Captured;
-        Touch();
+        MarkModified();
+    }
+
+    /// <summary>
+    /// An approved charge is captured in the same step: this API has no separate capture
+    /// call, so an approval from the provider settles the payment outright.
+    /// </summary>
+    public void AuthorizeAndCapture()
+    {
+        Authorize();
+        Capture();
     }
 
     public void Decline()
     {
         if (Status is not (PaymentStatus.Processing or PaymentStatus.RequiresReconciliation))
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.Declined);
+        }
 
         Status = PaymentStatus.Declined;
-        Touch();
+        MarkModified();
     }
 
     public void RejectAsFraud()
     {
-        if (Status != PaymentStatus.Processing)
+        if (Status is not PaymentStatus.Processing)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.FraudRejected);
+        }
 
         Status = PaymentStatus.FraudRejected;
-        Touch();
+        MarkModified();
     }
 
     /// <summary>
@@ -132,14 +188,17 @@ public class Payment : EntityBase
     /// </summary>
     public void MarkForReconciliation()
     {
-        if (Status != PaymentStatus.Processing)
+        if (Status is not PaymentStatus.Processing)
+        {
             throw new InvalidStateTransitionException(Status, PaymentStatus.RequiresReconciliation);
+        }
 
         Status = PaymentStatus.RequiresReconciliation;
-        Touch();
+        MarkModified();
     }
 
-    private void Touch()
+    /// <summary>Rotates the concurrency stamp so that any writer holding the old one loses.</summary>
+    private void MarkModified()
     {
         UpdatedAt = DateTime.UtcNow;
         ConcurrencyStamp = Guid.NewGuid();
