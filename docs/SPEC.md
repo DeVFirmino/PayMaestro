@@ -79,4 +79,4 @@ Every attempt and every fraud flag is persisted; deletes are restricted at the d
 
 ## Deliberate simplifications
 
-In-process simulated gateways; stubbed card/IP countries; SQLite, with `EnsureCreated` on startup for the demo while migrations carry the schema; auto-capture immediately after authorization; reconciliation is triggered by an endpoint rather than a background sweeper, so a process that dies mid-charge leaves a `Processing` row for an operator to reconcile.
+In-process simulated gateways; stubbed card/IP countries; SQLite, with `EnsureCreated` on startup in Development for the demo while migrations carry the schema; auto-capture immediately after authorization; reconciliation is triggered by an endpoint rather than a background sweeper, so a process that dies mid-charge leaves a `Processing` row for an operator to reconcile.

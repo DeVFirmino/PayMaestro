@@ -12,8 +12,10 @@ public sealed class PayMaestroDbContext : DbContext
     {
     }
 
-    public DbSet<Payment> Payment => Set<Payment>();
-    public DbSet<PaymentAttempt> PaymentAttempt => Set<PaymentAttempt>();
+    public DbSet<Payment> Payments => Set<Payment>();
+
+    public DbSet<PaymentAttempt> PaymentAttempts => Set<PaymentAttempt>();
+
     public DbSet<FraudFlag> FraudFlags => Set<FraudFlag>();
 
     // Timestamps are written with DateTime.UtcNow, but SQLite hands them back with an
@@ -35,6 +37,13 @@ public sealed class PayMaestroDbContext : DbContext
     {
         EntityTypeBuilder<Payment> payment = modelBuilder.Entity<Payment>();
 
+        // Payment.Create guards the amount too, but a C# factory only holds while every
+        // write goes through it. A migration or a bulk import would not.
+        // The CAST is load-bearing: SQLite stores decimal as TEXT, so a bare
+        // "Amount > 0" compares strings and lets '0.00' through.
+        payment.ToTable("Payment", table => table.HasCheckConstraint(
+            "CK_Payment_Amount_Positive", "CAST(Amount AS REAL) > 0"));
+
         payment.HasKey(entity => entity.Id);
         payment.Property(entity => entity.Id).ValueGeneratedNever();
 
@@ -43,8 +52,8 @@ public sealed class PayMaestroDbContext : DbContext
 
         payment.Property(entity => entity.Amount).HasPrecision(18, 2);
         payment.Property(entity => entity.Currency).IsRequired().HasMaxLength(3);
-        payment.Property(entity => entity.CardBin).HasMaxLength(6);
-        payment.Property(entity => entity.CardLast4).HasMaxLength(4);
+        payment.Property(entity => entity.CardBin).HasMaxLength(Payment.CardBinLength);
+        payment.Property(entity => entity.CardLast4).HasMaxLength(Payment.CardLast4Length);
         payment.Property(entity => entity.Status).HasConversion<string>();
         payment.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);
         payment.Property(entity => entity.UpdatedAt).HasConversion(UtcTimestamp);
@@ -52,13 +61,6 @@ public sealed class PayMaestroDbContext : DbContext
         // Optimistic concurrency: the UPDATE carries the stamp the writer loaded, so a writer
         // working from a stale payment fails instead of overwriting a settled outcome.
         payment.Property(entity => entity.ConcurrencyStamp).IsConcurrencyToken();
-
-        // Payment.Create guards this too, but a C# factory only holds while every
-        // write goes through it. A migration or a bulk import would not.
-        // The CAST is load-bearing: SQLite stores decimal as TEXT, so a bare
-        // "Amount > 0" compares strings and lets '0.00' through.
-        payment.ToTable(table => table.HasCheckConstraint(
-            "CK_Payment_Amount_Positive", "CAST(Amount AS REAL) > 0"));
 
         // Restrict: attempts and fraud flags are audit evidence — deleting a
         // payment must never silently delete its history.
@@ -72,6 +74,7 @@ public sealed class PayMaestroDbContext : DbContext
     {
         EntityTypeBuilder<PaymentAttempt> attempt = modelBuilder.Entity<PaymentAttempt>();
 
+        attempt.ToTable("PaymentAttempt");
         attempt.HasKey(entity => entity.Id);
 
         // The entity assigns its own id, so EF must not read a set key as "this row already
@@ -88,6 +91,7 @@ public sealed class PayMaestroDbContext : DbContext
     {
         EntityTypeBuilder<FraudFlag> flag = modelBuilder.Entity<FraudFlag>();
 
+        flag.ToTable("FraudFlags");
         flag.HasKey(entity => entity.Id);
         flag.Property(entity => entity.Id).ValueGeneratedNever();
         flag.Property(entity => entity.RuleName).IsRequired().HasMaxLength(50);

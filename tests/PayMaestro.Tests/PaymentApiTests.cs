@@ -9,7 +9,7 @@ namespace PayMaestro.Tests;
 /// The HTTP contract as a client sees it, through the real pipeline: controllers, the exception
 /// filter and the API behaviour options that unit tests on the use cases never exercise.
 /// </summary>
-public class PaymentApiTests : IClassFixture<PaymentApiFactory>
+public sealed class PaymentApiTests : IClassFixture<PaymentApiFactory>
 {
     private readonly HttpClient _client;
 
@@ -19,7 +19,7 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task Getting_an_unknown_payment_returns_404_with_an_empty_body()
+    public async Task ShouldAnswer404WithEmptyBodyWhenPaymentIsUnknown()
     {
         HttpResponseMessage response = await _client.GetAsync($"/api/payments/{Guid.NewGuid()}");
 
@@ -28,9 +28,9 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task Creating_a_payment_returns_200_with_the_attempt_trail()
+    public async Task ShouldAnswer200WithAttemptTrailWhenPaymentIsCreated()
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/payments")
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/payments")
         {
             Content = JsonContent.Create(new
             {
@@ -39,8 +39,8 @@ public class PaymentApiTests : IClassFixture<PaymentApiFactory>
                 amount = 50m,
                 currency = "EUR",
                 cardNumber = "4111111111117777",
-                customerIp = "203.0.113.10"
-            })
+                customerIp = "203.0.113.10",
+            }),
         };
         request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
 
