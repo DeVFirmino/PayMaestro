@@ -1,62 +1,62 @@
-using Microsoft.Extensions.Options;
 using PayMaestro.Application.Contracts;
-using PayMaestro.Application.Options;
-using PayMaestro.Application.Services;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
 using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories;
-using PayMaestro.Domain.Repositories.PaymentRepository;
+using PayMaestro.Domain.Repositories.Payments;
 
 namespace PayMaestro.Application.UseCases.Payments.CreatePayment;
 
 /// <summary>
-/// Coordinates the full payment flow, in order:
+/// Runs the full payment flow, in order:
 /// idempotency replay -> key reservation -> fraud screening -> gateway routing -> cascade -> persistence.
 /// The reservation is committed <em>before</em> any gateway is contacted: a duplicate request
 /// then loses the insert race while the money movement is still ahead of it, not behind it.
 /// </summary>
 public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
 {
-    private readonly IPaymentReadOnlyRepository _readRepository;
-    private readonly IPaymentWriteOnlyRepository _writeRepository;
+    // Country lookups are stubbed; production would resolve them via a BIN table and GeoIP.
+    private const string StubCountry = "MT";
+
+    private readonly IPaymentReadOnlyRepository _paymentsReader;
+    private readonly IPaymentWriteOnlyRepository _paymentsWriter;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IEnumerable<IPaymentGateway> _gateways;
     private readonly IEnumerable<IFraudRule> _fraudRules;
-    private readonly IOptions<GatewayRoutingOptions> _routingOptions;
+    private readonly GatewayRouter _router;
     private readonly CascadeExecutor _cascade;
 
     public CreatePaymentUseCase(
-        IPaymentReadOnlyRepository readRepository,
-        IPaymentWriteOnlyRepository writeRepository,
+        IPaymentReadOnlyRepository paymentsReader,
+        IPaymentWriteOnlyRepository paymentsWriter,
         IUnitOfWork unitOfWork,
-        IEnumerable<IPaymentGateway> gateways,
         IEnumerable<IFraudRule> fraudRules,
-        IOptions<GatewayRoutingOptions> routingOptions,
+        GatewayRouter router,
         CascadeExecutor cascade)
     {
-        _readRepository = readRepository;
-        _writeRepository = writeRepository;
+        _paymentsReader = paymentsReader;
+        _paymentsWriter = paymentsWriter;
         _unitOfWork = unitOfWork;
-        _gateways = gateways;
         _fraudRules = fraudRules;
-        _routingOptions = routingOptions;
+        _router = router;
         _cascade = cascade;
     }
 
     public async Task<PaymentResponse> Execute(
         string idempotencyKey,
         CreatePaymentRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        Payment? existing = await _readRepository.GetByIdempotencyKeyAsync(
-            idempotencyKey,
-            cancellationToken);
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            throw new ValidationFailedException(ErrorMessages.IdempotencyKeyHeaderRequired);
+        }
+
+        Payment? existing = await _paymentsReader.GetByIdempotencyKeyAsync(idempotencyKey, cancellationToken);
         if (existing is not null)
         {
-            return HandleExisting(existing, request);
+            return ReplayExisting(existing, request);
         }
 
         Payment payment = CreatePaymentFrom(idempotencyKey, request);
@@ -64,31 +64,30 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
 
         try
         {
-            await _writeRepository.AddAsync(payment, cancellationToken);
+            await _paymentsWriter.AddAsync(payment, cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken); // claims the key; no gateway has been contacted yet
         }
         catch (UniqueConstraintViolationException)
         {
             // A concurrent request claimed the key first. It owns the charge, and this request
             // has not called a gateway, so there is nothing to undo — report the winner's state.
-            Payment? winner = await _readRepository.GetByIdempotencyKeyAsync(
-                idempotencyKey,
-                cancellationToken);
+            Payment? winner = await _paymentsReader.GetByIdempotencyKeyAsync(idempotencyKey, cancellationToken);
             if (winner is null)
             {
                 throw;
             }
 
-            return HandleExisting(winner, request);
+            return ReplayExisting(winner, request);
         }
 
-        if (await ScreenForFraud(payment, cancellationToken))
+        if (await IsSuspiciousAsync(payment, cancellationToken))
         {
             payment.RejectAsFraud(); // no gateway is ever contacted
         }
         else
         {
-            await _cascade.ExecuteAsync(payment, ResolveRoute(payment), cancellationToken);
+            IReadOnlyList<IPaymentGateway> route = _router.RouteFor(payment);
+            await _cascade.ExecuteAsync(payment, route, cancellationToken);
         }
 
         await _unitOfWork.CommitAsync(cancellationToken); // guarded by the payment's concurrency stamp
@@ -96,7 +95,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         return payment.ToResponse();
     }
 
-    private static PaymentResponse HandleExisting(Payment existing, CreatePaymentRequest request)
+    private static PaymentResponse ReplayExisting(Payment existing, CreatePaymentRequest request)
     {
         if (PayloadDiffers(existing, request))
         {
@@ -124,12 +123,12 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         || existing.MerchantReference != request.MerchantReference
         || existing.CustomerId != request.CustomerId
         || existing.Currency != request.Currency.ToUpperInvariant()
-        || existing.CardBin != request.CardNumber[..6]
-        || existing.CardLast4 != request.CardNumber[^4..]
+        || existing.CardBin != CardBin(request)
+        || existing.CardLast4 != CardLast4(request)
         || existing.CustomerIp != request.CustomerIp;
 
     /// <summary>Runs every registered fraud rule; each hit is recorded as a FraudFlag.</summary>
-    private async Task<bool> ScreenForFraud(Payment payment, CancellationToken cancellationToken)
+    private async Task<bool> IsSuspiciousAsync(Payment payment, CancellationToken cancellationToken)
     {
         bool suspicious = false;
 
@@ -141,7 +140,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
                 continue;
             }
 
-            payment.AddFraudFlag(FraudFlag.Create(payment.Id, rule.RuleName, verdict.Details ?? ""));
+            payment.AddFraudFlag(FraudFlag.Create(payment.Id, rule.RuleName, verdict.Details ?? string.Empty));
             suspicious = true;
         }
 
@@ -150,19 +149,18 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
 
     private static Payment CreatePaymentFrom(string idempotencyKey, CreatePaymentRequest request)
         => Payment.Create(
-            idempotencyKey, request.MerchantReference, request.CustomerId,
-            request.Amount, request.Currency.ToUpperInvariant(),
-            cardBin: request.CardNumber[..6],
-            cardLast4: request.CardNumber[^4..],
-            // country lookups stubbed; production would resolve them via BIN table / GeoIP
-            cardCountry: "MT", customerIp: request.CustomerIp, ipCountry: "MT");
+            idempotencyKey,
+            request.MerchantReference,
+            request.CustomerId,
+            request.Amount,
+            request.Currency,
+            cardBin: CardBin(request),
+            cardLast4: CardLast4(request),
+            cardCountry: StubCountry,
+            customerIp: request.CustomerIp,
+            ipCountry: StubCountry);
 
-    private List<IPaymentGateway> ResolveRoute(Payment payment)
-        => _routingOptions.Value.Gateways
-            .Where(configuration => configuration.SupportedCurrencies.Contains(payment.Currency)
-                       && payment.Amount <= configuration.MaxAmount)
-            .OrderBy(configuration => configuration.Priority)
-            .Select(configuration => _gateways.FirstOrDefault(gateway => gateway.Name == configuration.Name))
-            .OfType<IPaymentGateway>()
-            .ToList();
+    private static string CardBin(CreatePaymentRequest request) => request.CardNumber[..Payment.CardBinLength];
+
+    private static string CardLast4(CreatePaymentRequest request) => request.CardNumber[^Payment.CardLast4Length..];
 }

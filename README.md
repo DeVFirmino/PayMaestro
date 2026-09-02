@@ -83,7 +83,7 @@ The `Payment` aggregate guards its own state transitions. An invalid transition 
 Clean architecture: `API → Application → Domain ← Infrastructure`.
 
 - **Domain**: entities, the state machine and all contracts — gateways, fraud rules, repositories (read / write / update) and the unit of work. No external references.
-- **Application**: one use case class per operation, plus the `CascadeExecutor`, which owns the cascade policy.
+- **Application**: one use case class per operation, plus the `GatewayRouter`, which picks the eligible gateways, and the `CascadeExecutor`, which owns the cascade policy.
 - **Infrastructure**: EF Core with SQLite, and the three mock gateways.
 - **API**: MVC controllers, a global exception filter and Swagger.
 
