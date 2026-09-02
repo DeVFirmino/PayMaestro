@@ -8,8 +8,8 @@ namespace PayMaestro.Domain.Exceptions;
 /// </summary>
 public sealed class ConcurrentPaymentModificationException : PayMaestroException
 {
-    public ConcurrentPaymentModificationException()
-        : base("The payment was modified by another operation. Reload it and retry.")
+    public ConcurrentPaymentModificationException(Exception innerException)
+        : base(ErrorMessages.ConcurrentModification, innerException)
     {
     }
 
