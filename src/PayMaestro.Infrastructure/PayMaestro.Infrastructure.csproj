@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\PayMaestro.Application\PayMaestro.Application.csproj" />
+    <ProjectReference Include="..\PayMaestro.Domain\PayMaestro.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>
