@@ -71,6 +71,16 @@ public sealed class PaymentApiTests : IClassFixture<PaymentApiFactory>
         Assert.Equal(1, stored.RootElement.GetProperty("attempts").GetArrayLength());
     }
 
+    [Fact]
+    public async Task ShouldAnswer200WithPaymentListWhenRecoveryRuns()
+    {
+        HttpResponseMessage response = await _client.PostAsync("/api/payments/recovery", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("payments").ValueKind);
+    }
+
     private async Task<HttpResponseMessage> PostPaymentAsync(string idempotencyKey, string cardNumber)
     {
         using HttpRequestMessage request = new(HttpMethod.Post, "/api/payments")

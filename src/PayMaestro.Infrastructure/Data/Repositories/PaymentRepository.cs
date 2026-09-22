@@ -25,6 +25,16 @@ public sealed class PaymentRepository : IPaymentReadOnlyRepository, IPaymentWrit
     public Task<Payment?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken)
         => PaymentsWithHistory.FirstOrDefaultAsync(payment => payment.IdempotencyKey == idempotencyKey, cancellationToken);
 
+    public async Task<IReadOnlyList<Payment>> GetProcessingWithoutAttemptsAsync(
+        DateTime reservedBefore,
+        CancellationToken cancellationToken)
+        => await PaymentsWithHistory
+            .Where(payment => payment.Status == PaymentStatus.Processing
+                              && payment.CreatedAt <= reservedBefore
+                              && payment.Attempts.Any() == false)
+            .OrderBy(payment => payment.CreatedAt)
+            .ToListAsync(cancellationToken);
+
     public Task<int> CountRecentDeclinedAttemptsAsync(
         string cardBin,
         string cardLast4,

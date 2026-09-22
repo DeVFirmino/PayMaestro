@@ -7,6 +7,7 @@ using PayMaestro.Application.Options;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Application.UseCases.Payments.GetPaymentById;
 using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
+using PayMaestro.Application.UseCases.Payments.RecoverOrphanedPayments;
 using PayMaestro.Domain.Cards;
 using PayMaestro.Domain.Fraud;
 
@@ -17,6 +18,7 @@ public static class DependencyInjectionExtension
     public static void AddApplication(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<GatewayRoutingOptions>(configuration.GetSection(GatewayRoutingOptions.SectionName));
+        services.Configure<PaymentRecoveryOptions>(configuration.GetSection(PaymentRecoveryOptions.SectionName));
         services.AddOptions<CardFingerprintOptions>()
             .Bind(configuration.GetSection(CardFingerprintOptions.SectionName))
             .ValidateOnStart();
@@ -25,6 +27,7 @@ public static class DependencyInjectionExtension
         services.AddScoped<ICreatePaymentUseCase, CreatePaymentUseCase>();
         services.AddScoped<IGetPaymentByIdUseCase, GetPaymentByIdUseCase>();
         services.AddScoped<IReconcilePaymentUseCase, ReconcilePaymentUseCase>();
+        services.AddScoped<IRecoverOrphanedPaymentsUseCase, RecoverOrphanedPaymentsUseCase>();
 
         services.AddSingleton<ICardFingerprinter, HmacCardFingerprinter>();
         services.AddScoped<CascadeExecutor>();

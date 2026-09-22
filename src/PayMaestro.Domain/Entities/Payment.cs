@@ -182,6 +182,26 @@ public sealed class Payment : EntityBase
         MarkModified();
     }
 
+    /// <summary>
+    /// Closes a payment whose request died before any gateway call was saved, once recovery has
+    /// asked every provider on its route and none has a record of the charge.
+    /// </summary>
+    public void FailWithoutCharge()
+    {
+        if (Status is not PaymentStatus.Processing)
+        {
+            throw new InvalidStateTransitionException(Status, PaymentStatus.FailedWithoutCharge);
+        }
+
+        if (Attempts.Count > 0)
+        {
+            throw new InvalidOperationException("A payment with a recorded gateway attempt is settled from that attempt, not failed without charge.");
+        }
+
+        Status = PaymentStatus.FailedWithoutCharge;
+        MarkModified();
+    }
+
     public void RejectAsFraud()
     {
         if (Status is not PaymentStatus.Processing)

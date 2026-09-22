@@ -22,8 +22,6 @@ public abstract class MockGateway : IPaymentGateway
     protected static readonly GatewayResult InsufficientFunds = new(GatewayResultType.SoftDecline, "51");
     protected static readonly GatewayResult ProviderUnavailable = new(GatewayResultType.Error, "96");
 
-    private static readonly GatewayResult NotFound = new(GatewayResultType.Error, "not_found");
-
     private readonly MockProviderLedger _ledger;
 
     protected MockGateway(MockProviderLedger ledger)
@@ -57,8 +55,8 @@ public abstract class MockGateway : IPaymentGateway
         return settled;
     }
 
-    public async Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
-        => await _ledger.FindAsync(providerIdempotencyKey, cancellationToken) ?? NotFound;
+    public Task<GatewayResult?> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
+        => _ledger.FindAsync(providerIdempotencyKey, cancellationToken);
 
     /// <summary>Every mock declines the stolen test card and approves anything it has no rule for.</summary>
     protected virtual GatewayResult Decide(Payment payment)

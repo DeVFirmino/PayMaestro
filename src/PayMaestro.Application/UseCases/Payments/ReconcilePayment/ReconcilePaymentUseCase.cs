@@ -50,9 +50,9 @@ public sealed class ReconcilePaymentUseCase : IReconcilePaymentUseCase
         IPaymentGateway gateway = _gateways.FirstOrDefault(candidate => candidate.Name == lastAttempt.GatewayName)
             ?? throw new GatewayUnavailableException(lastAttempt.GatewayName);
 
-        GatewayResult outcome = await gateway.QueryAsync(lastAttempt.ProviderIdempotencyKey, cancellationToken);
+        GatewayResult? outcome = await gateway.QueryAsync(lastAttempt.ProviderIdempotencyKey, cancellationToken);
 
-        switch (outcome.ResultType)
+        switch (outcome?.ResultType)
         {
             case GatewayResultType.Approved:
                 payment.AuthorizeAndCapture();
@@ -62,7 +62,7 @@ public sealed class ReconcilePaymentUseCase : IReconcilePaymentUseCase
                 return payment.ToResponse();    // still unknown: leave it for the next attempt
 
             default:
-                payment.Decline();              // the provider confirms no money moved
+                payment.Decline();              // no record, or a decline: the provider confirms no money moved
                 break;
         }
 

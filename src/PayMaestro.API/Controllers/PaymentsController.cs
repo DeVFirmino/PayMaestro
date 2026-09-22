@@ -3,6 +3,7 @@ using PayMaestro.Application.Contracts;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Application.UseCases.Payments.GetPaymentById;
 using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
+using PayMaestro.Application.UseCases.Payments.RecoverOrphanedPayments;
 
 namespace PayMaestro.API.Controllers;
 
@@ -57,6 +58,28 @@ public sealed class PaymentsController : ControllerBase
         CancellationToken cancellationToken)
     {
         PaymentResponse response = await useCase.Execute(id, cancellationToken);
+
+        return Ok(response);
+    }
+
+    /// <summary>Settles payments left in Processing with no gateway attempt saved.</summary>
+    /// <remarks>
+    /// Picks up payments whose request was cancelled, crashed or failed its final save, once they
+    /// are older than <c>PaymentRecovery:OrphanThreshold</c>. For each one it asks the providers on
+    /// its route, in cascade order, about the key each attempt would have used, and settles it from
+    /// what they recorded. A payment no provider has a record of ends <c>FailedWithoutCharge</c>.
+    /// Nothing is charged.
+    /// </remarks>
+    /// <response code="200">The payments this run settled, each with the attempts it recovered.</response>
+    /// <response code="409">A payment was settled by its own request while recovery ran. Payments before it stay settled; run recovery again.</response>
+    [HttpPost("recovery")]
+    [ProducesResponseType(typeof(RecoverOrphanedPaymentsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RecoverOrphaned(
+        [FromServices] IRecoverOrphanedPaymentsUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        RecoverOrphanedPaymentsResponse response = await useCase.Execute(cancellationToken);
 
         return Ok(response);
     }

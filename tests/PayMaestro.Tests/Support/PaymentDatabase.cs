@@ -5,6 +5,7 @@ using PayMaestro.Application.Cards;
 using PayMaestro.Application.Options;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
+using PayMaestro.Application.UseCases.Payments.RecoverOrphanedPayments;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
@@ -72,6 +73,39 @@ public sealed class PaymentDatabase : IDisposable, IDbContextFactory<PayMaestroD
         PayMaestroDbContext context,
         params IPaymentGateway[] gateways)
         => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
+
+    public RecoverOrphanedPaymentsUseCase NewRecoverOrphanedPaymentsUseCase(
+        PayMaestroDbContext context,
+        TimeSpan orphanThreshold,
+        params IPaymentGateway[] gateways)
+        => new(
+            new PaymentRepository(context),
+            new UnitOfWork(context),
+            new GatewayRouter(Routing(gateways), gateways),
+            Options.Create(new PaymentRecoveryOptions { OrphanThreshold = orphanThreshold }));
+
+    /// <summary>
+    /// Commits a payment that holds its key and has no attempt, then stops: the state a request
+    /// leaves behind when it dies after the reservation and before its final save.
+    /// </summary>
+    public async Task<Payment> SaveOrphanAsync(Payment payment)
+    {
+        using PayMaestroDbContext context = NewContext();
+        context.Payments.Add(payment);
+        await context.SaveChangesAsync();
+
+        return payment;
+    }
+
+    /// <summary>Reads a payment and its attempts as committed, on a connection of its own.</summary>
+    public async Task<Payment> FindCommittedWithAttemptsAsync(Guid paymentId)
+    {
+        using PayMaestroDbContext observer = NewContext();
+
+        return await observer.Payments.AsNoTracking()
+            .Include(payment => payment.Attempts)
+            .SingleAsync(payment => payment.Id == paymentId);
+    }
 
     /// <summary>Reads committed state only, on a connection of its own.</summary>
     public Payment? FindCommittedByKey(string idempotencyKey)

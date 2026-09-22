@@ -145,7 +145,7 @@ public sealed class IdempotencyReservationTests
 
         GatewayResult first = await gateway.ProcessAsync(payment, "provider-key-1", CancellationToken.None);
         GatewayResult second = await gateway.ProcessAsync(payment, "provider-key-1", CancellationToken.None);
-        GatewayResult queried = await gateway.QueryAsync("provider-key-1", CancellationToken.None);
+        GatewayResult? queried = await gateway.QueryAsync("provider-key-1", CancellationToken.None);
 
         Assert.Equal(GatewayResultType.Approved, first.ResultType);
         Assert.Equal(first, second);         // the provider replays its own outcome
