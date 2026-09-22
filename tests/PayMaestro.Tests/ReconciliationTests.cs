@@ -3,6 +3,7 @@ using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
 using PayMaestro.Infrastructure.Data;
+using PayMaestro.Infrastructure.PaymentGateways;
 using PayMaestro.Tests.Support;
 
 namespace PayMaestro.Tests;
@@ -45,6 +46,29 @@ public sealed class ReconciliationTests
 
         Assert.Equal(nameof(PaymentStatus.Captured), settled.Status);
         Assert.Equal(1, silent.Charges);    // the query asked, it did not pay
+    }
+
+    [Fact]
+    public async Task ShouldSettleFromProviderRecordWhenReconciledAfterRestart()
+    {
+        // The shipped mock acquirer, not a test double: its ledger is what has to survive.
+        using PaymentDatabase db = new();
+        AlphaPayGateway beforeRestart = new(db.NewProviderLedger());
+        CreatePaymentRequest unansweredCharge = new CreatePaymentRequestBuilder().WithCardNumber("4111111111119999").Build();
+
+        using PayMaestroDbContext chargeContext = db.NewContext();
+        PaymentResponse pending = await db.NewCreatePaymentUseCase(chargeContext, gateways: [beforeRestart])
+            .Execute("key-1", unansweredCharge, CancellationToken.None);
+
+        // A new process: a new ledger instance with nothing in memory, over the same database.
+        AlphaPayGateway afterRestart = new(db.NewProviderLedger());
+
+        using PayMaestroDbContext reconcileContext = db.NewContext();
+        PaymentResponse settled = await db.NewReconcilePaymentUseCase(reconcileContext, afterRestart)
+            .Execute(pending.Id, CancellationToken.None);
+
+        Assert.Equal(nameof(PaymentStatus.RequiresReconciliation), pending.Status);
+        Assert.Equal(nameof(PaymentStatus.Captured), settled.Status);   // not Declined: the charge was not forgotten
     }
 
     [Fact]

@@ -107,4 +107,24 @@ public sealed class PaymentTests
 
         Assert.Equal(ErrorMessages.AmountMustBePositive, exception.Message);
     }
+
+    [Fact]
+    public void ShouldFailWithoutChargeWhenReservedPaymentHasNoAttempt()
+    {
+        Payment payment = new PaymentBuilder().BuildReserved();
+
+        payment.FailWithoutCharge();
+
+        Assert.Equal(PaymentStatus.FailedWithoutCharge, payment.Status);
+    }
+
+    [Fact]
+    public void ShouldRefuseFailWithoutChargeWhenPaymentHasAttempt()
+    {
+        Payment payment = new PaymentBuilder().BuildReserved();
+        payment.RecordAttempt(PaymentAttempt.Create(
+            payment.Id, "Alpha", 1, GatewayResultType.Approved, "00", 10, "key-1:Alpha:1"));
+
+        Assert.Throws<InvalidOperationException>(payment.FailWithoutCharge);
+    }
 }

@@ -12,7 +12,6 @@ namespace PayMaestro.Tests.Support;
 public sealed class TestGateway : IPaymentGateway
 {
     private static readonly GatewayResult Approved = new(GatewayResultType.Approved, "00");
-    private static readonly GatewayResult NotFound = new(GatewayResultType.Error, "not_found");
 
     private readonly ConcurrentDictionary<string, GatewayResult> _settled = new();
     private readonly Func<Task>? _whileCharging;
@@ -60,6 +59,6 @@ public sealed class TestGateway : IPaymentGateway
         return Approved;
     }
 
-    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
-        => Task.FromResult(_settled.TryGetValue(providerIdempotencyKey, out GatewayResult? settled) ? settled : NotFound);
+    public Task<GatewayResult?> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
+        => Task.FromResult(_settled.TryGetValue(providerIdempotencyKey, out GatewayResult? settled) ? settled : null);
 }

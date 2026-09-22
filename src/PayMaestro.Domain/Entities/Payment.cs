@@ -5,10 +5,13 @@ namespace PayMaestro.Domain.Entities;
 
 public sealed class Payment : EntityBase
 {
-    /// <summary>Only the BIN and the last four digits are ever stored; the full PAN never is.</summary>
+    /// <summary>Only the BIN, the last four digits and a keyed fingerprint are ever stored; the full PAN never is.</summary>
     public const int CardBinLength = 6;
 
     public const int CardLast4Length = 4;
+
+    /// <summary>Hex length of an HMAC-SHA256 digest.</summary>
+    public const int CardFingerprintLength = 64;
 
     private const int CurrencyCodeLength = 3;
 
@@ -27,6 +30,12 @@ public sealed class Payment : EntityBase
     public string CardBin { get; private set; } = null!;
 
     public string CardLast4 { get; private set; } = null!;
+
+    /// <summary>
+    /// Identifies the exact card. BIN and last four are shared by many cards, so they cannot tell
+    /// a reused key from a different card; this can, and it cannot be turned back into the number.
+    /// </summary>
+    public string CardFingerprint { get; private set; } = null!;
 
     public string CardCountry { get; private set; } = null!;
 
@@ -63,6 +72,7 @@ public sealed class Payment : EntityBase
         string currency,
         string cardBin,
         string cardLast4,
+        string cardFingerprint,
         string cardCountry,
         string customerIp,
         string ipCountry)
@@ -91,6 +101,7 @@ public sealed class Payment : EntityBase
             Currency = currency.ToUpperInvariant(),
             CardBin = cardBin,
             CardLast4 = cardLast4,
+            CardFingerprint = cardFingerprint,
             CardCountry = cardCountry,
             CustomerIp = customerIp,
             IpCountry = ipCountry,
@@ -168,6 +179,26 @@ public sealed class Payment : EntityBase
         }
 
         Status = PaymentStatus.Declined;
+        MarkModified();
+    }
+
+    /// <summary>
+    /// Closes a payment whose request died before any gateway call was saved, once recovery has
+    /// asked every provider on its route and none has a record of the charge.
+    /// </summary>
+    public void FailWithoutCharge()
+    {
+        if (Status is not PaymentStatus.Processing)
+        {
+            throw new InvalidStateTransitionException(Status, PaymentStatus.FailedWithoutCharge);
+        }
+
+        if (Attempts.Count > 0)
+        {
+            throw new InvalidOperationException("A payment with a recorded gateway attempt is settled from that attempt, not failed without charge.");
+        }
+
+        Status = PaymentStatus.FailedWithoutCharge;
         MarkModified();
     }
 

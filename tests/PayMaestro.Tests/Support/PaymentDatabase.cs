@@ -1,24 +1,28 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using PayMaestro.Application.Cards;
 using PayMaestro.Application.Options;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
+using PayMaestro.Application.UseCases.Payments.RecoverOrphanedPayments;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Fraud;
 using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories.Payments;
 using PayMaestro.Infrastructure.Data;
 using PayMaestro.Infrastructure.Data.Repositories;
+using PayMaestro.Infrastructure.PaymentGateways;
 
 namespace PayMaestro.Tests.Support;
 
 /// <summary>
 /// A real SQLite file, so the unique index on the idempotency key and the concurrency stamp are
 /// enforced by the database instead of simulated. Each simulated request gets its own context,
-/// the way a scoped lifetime would give it one in the API.
+/// the way a scoped lifetime would give it one in the API. It is also the context factory the
+/// provider ledger opens its own contexts from, as the API's registered factory would.
 /// </summary>
-public sealed class PaymentDatabase : IDisposable
+public sealed class PaymentDatabase : IDisposable, IDbContextFactory<PayMaestroDbContext>
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"paymaestro-{Guid.NewGuid():N}.db");
 
@@ -32,6 +36,14 @@ public sealed class PaymentDatabase : IDisposable
         new DbContextOptionsBuilder<PayMaestroDbContext>()
             .UseSqlite($"Data Source={_path}")
             .Options);
+
+    public PayMaestroDbContext CreateDbContext() => NewContext();
+
+    /// <summary>
+    /// A ledger with nothing in memory. Two of these over the same database behave like one provider
+    /// before and after a restart: whatever the first recorded, the second can only read from disk.
+    /// </summary>
+    public MockProviderLedger NewProviderLedger() => new(this);
 
     public CreatePaymentUseCase NewCreatePaymentUseCase(
         PayMaestroDbContext context,
@@ -47,13 +59,53 @@ public sealed class PaymentDatabase : IDisposable
             new UnitOfWork(context),
             fraudRules ?? [],
             new GatewayRouter(Routing(gateways), gateways),
-            new CascadeExecutor());
+            new CascadeExecutor(),
+            CardFingerprinter);
     }
+
+    /// <summary>The fingerprinter every simulated request shares, the way the API registers one per process.</summary>
+    public static HmacCardFingerprinter CardFingerprinter { get; } = new(Options.Create(new CardFingerprintOptions
+    {
+        Key = "test-only-card-fingerprint-key-0123456789",
+    }));
 
     public ReconcilePaymentUseCase NewReconcilePaymentUseCase(
         PayMaestroDbContext context,
         params IPaymentGateway[] gateways)
         => new(new PaymentRepository(context), new UnitOfWork(context), gateways);
+
+    public RecoverOrphanedPaymentsUseCase NewRecoverOrphanedPaymentsUseCase(
+        PayMaestroDbContext context,
+        TimeSpan orphanThreshold,
+        params IPaymentGateway[] gateways)
+        => new(
+            new PaymentRepository(context),
+            new UnitOfWork(context),
+            new GatewayRouter(Routing(gateways), gateways),
+            Options.Create(new PaymentRecoveryOptions { OrphanThreshold = orphanThreshold }));
+
+    /// <summary>
+    /// Commits a payment that holds its key and has no attempt, then stops: the state a request
+    /// leaves behind when it dies after the reservation and before its final save.
+    /// </summary>
+    public async Task<Payment> SaveOrphanAsync(Payment payment)
+    {
+        using PayMaestroDbContext context = NewContext();
+        context.Payments.Add(payment);
+        await context.SaveChangesAsync();
+
+        return payment;
+    }
+
+    /// <summary>Reads a payment and its attempts as committed, on a connection of its own.</summary>
+    public async Task<Payment> FindCommittedWithAttemptsAsync(Guid paymentId)
+    {
+        using PayMaestroDbContext observer = NewContext();
+
+        return await observer.Payments.AsNoTracking()
+            .Include(payment => payment.Attempts)
+            .SingleAsync(payment => payment.Id == paymentId);
+    }
 
     /// <summary>Reads committed state only, on a connection of its own.</summary>
     public Payment? FindCommittedByKey(string idempotencyKey)
