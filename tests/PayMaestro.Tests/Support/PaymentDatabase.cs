@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using PayMaestro.Application.Cards;
 using PayMaestro.Application.Options;
 using PayMaestro.Application.UseCases.Payments.CreatePayment;
 using PayMaestro.Application.UseCases.Payments.ReconcilePayment;
@@ -47,8 +48,15 @@ public sealed class PaymentDatabase : IDisposable
             new UnitOfWork(context),
             fraudRules ?? [],
             new GatewayRouter(Routing(gateways), gateways),
-            new CascadeExecutor());
+            new CascadeExecutor(),
+            CardFingerprinter);
     }
+
+    /// <summary>The fingerprinter every simulated request shares, the way the API registers one per process.</summary>
+    public static HmacCardFingerprinter CardFingerprinter { get; } = new(Options.Create(new CardFingerprintOptions
+    {
+        Key = "test-only-card-fingerprint-key-0123456789",
+    }));
 
     public ReconcilePaymentUseCase NewReconcilePaymentUseCase(
         PayMaestroDbContext context,

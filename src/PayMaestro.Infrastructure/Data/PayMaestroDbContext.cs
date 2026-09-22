@@ -54,6 +54,7 @@ public sealed class PayMaestroDbContext : DbContext
         payment.Property(entity => entity.Currency).IsRequired().HasMaxLength(3);
         payment.Property(entity => entity.CardBin).HasMaxLength(Payment.CardBinLength);
         payment.Property(entity => entity.CardLast4).HasMaxLength(Payment.CardLast4Length);
+        payment.Property(entity => entity.CardFingerprint).IsRequired().HasMaxLength(Payment.CardFingerprintLength);
         payment.Property(entity => entity.Status).HasConversion<string>();
         payment.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);
         payment.Property(entity => entity.UpdatedAt).HasConversion(UtcTimestamp);

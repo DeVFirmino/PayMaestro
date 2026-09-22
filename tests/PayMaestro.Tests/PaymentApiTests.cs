@@ -51,4 +51,42 @@ public sealed class PaymentApiTests : IClassFixture<PaymentApiFactory>
         Assert.Equal("Captured", body.RootElement.GetProperty("status").GetString());
         Assert.True(body.RootElement.GetProperty("attempts").GetArrayLength() > 0);
     }
+
+    [Fact]
+    public async Task ShouldAnswer422WithoutNewAttemptWhenSameKeyCarriesCardDifferingOnlyInMiddleDigits()
+    {
+        string key = Guid.NewGuid().ToString();
+
+        HttpResponseMessage first = await PostPaymentAsync(key, "4111111111117777");
+        using JsonDocument created = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        string paymentId = created.RootElement.GetProperty("id").GetString()!;
+
+        HttpResponseMessage second = await PostPaymentAsync(key, "4111119999997777");
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, second.StatusCode);
+
+        // The refused request reached no provider: the stored payment still has its one attempt.
+        using JsonDocument stored = JsonDocument.Parse(await _client.GetStringAsync($"/api/payments/{paymentId}"));
+        Assert.Equal(1, stored.RootElement.GetProperty("attempts").GetArrayLength());
+    }
+
+    private async Task<HttpResponseMessage> PostPaymentAsync(string idempotencyKey, string cardNumber)
+    {
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/payments")
+        {
+            Content = JsonContent.Create(new
+            {
+                merchantReference = "ORDER-1",
+                customerId = "cust-1",
+                amount = 50m,
+                currency = "EUR",
+                cardNumber,
+                customerIp = "203.0.113.10",
+            }),
+        };
+        request.Headers.Add("Idempotency-Key", idempotencyKey);
+
+        return await _client.SendAsync(request);
+    }
 }

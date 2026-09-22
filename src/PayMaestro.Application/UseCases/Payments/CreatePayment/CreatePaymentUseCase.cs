@@ -1,4 +1,5 @@
 using PayMaestro.Application.Contracts;
+using PayMaestro.Domain.Cards;
 using PayMaestro.Domain.Entities;
 using PayMaestro.Domain.Enums;
 using PayMaestro.Domain.Exceptions;
@@ -26,6 +27,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
     private readonly IEnumerable<IFraudRule> _fraudRules;
     private readonly GatewayRouter _router;
     private readonly CascadeExecutor _cascade;
+    private readonly ICardFingerprinter _cardFingerprinter;
 
     public CreatePaymentUseCase(
         IPaymentReadOnlyRepository paymentsReader,
@@ -33,7 +35,8 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         IUnitOfWork unitOfWork,
         IEnumerable<IFraudRule> fraudRules,
         GatewayRouter router,
-        CascadeExecutor cascade)
+        CascadeExecutor cascade,
+        ICardFingerprinter cardFingerprinter)
     {
         _paymentsReader = paymentsReader;
         _paymentsWriter = paymentsWriter;
@@ -41,6 +44,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         _fraudRules = fraudRules;
         _router = router;
         _cascade = cascade;
+        _cardFingerprinter = cardFingerprinter;
     }
 
     public async Task<PaymentResponse> Execute(
@@ -53,13 +57,16 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
             throw new ValidationFailedException(ErrorMessages.IdempotencyKeyHeaderRequired);
         }
 
+        // Computed while the request still holds the full number; only the fingerprint is kept.
+        string cardFingerprint = _cardFingerprinter.Fingerprint(request.CardNumber);
+
         Payment? existing = await _paymentsReader.GetByIdempotencyKeyAsync(idempotencyKey, cancellationToken);
         if (existing is not null)
         {
-            return ReplayExisting(existing, request);
+            return ReplayExisting(existing, request, cardFingerprint);
         }
 
-        Payment payment = CreatePaymentFrom(idempotencyKey, request);
+        Payment payment = CreatePaymentFrom(idempotencyKey, request, cardFingerprint);
         payment.BeginProcessing();
 
         try
@@ -77,7 +84,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
                 throw;
             }
 
-            return ReplayExisting(winner, request);
+            return ReplayExisting(winner, request, cardFingerprint);
         }
 
         if (await IsSuspiciousAsync(payment, cancellationToken))
@@ -95,9 +102,9 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         return payment.ToResponse();
     }
 
-    private static PaymentResponse ReplayExisting(Payment existing, CreatePaymentRequest request)
+    private static PaymentResponse ReplayExisting(Payment existing, CreatePaymentRequest request, string cardFingerprint)
     {
-        if (PayloadDiffers(existing, request))
+        if (PayloadDiffers(existing, request, cardFingerprint))
         {
             throw new IdempotencyKeyReuseException(existing.IdempotencyKey);
         }
@@ -116,15 +123,15 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
     /// <summary>
     /// A key only replays the outcome of the exact request that reserved it. Any change to what
     /// would be charged — amount, currency, card, customer — is a different payment wearing an
-    /// old key, and must be refused rather than answered with the stored outcome.
+    /// old key, and must be refused rather than answered with the stored outcome. The card is
+    /// compared by fingerprint, so two cards sharing BIN and last four are still different cards.
     /// </summary>
-    private static bool PayloadDiffers(Payment existing, CreatePaymentRequest request)
+    private static bool PayloadDiffers(Payment existing, CreatePaymentRequest request, string cardFingerprint)
         => existing.Amount != request.Amount
         || existing.MerchantReference != request.MerchantReference
         || existing.CustomerId != request.CustomerId
         || existing.Currency != request.Currency.ToUpperInvariant()
-        || existing.CardBin != CardBin(request)
-        || existing.CardLast4 != CardLast4(request)
+        || existing.CardFingerprint != cardFingerprint
         || existing.CustomerIp != request.CustomerIp;
 
     /// <summary>Runs every registered fraud rule; each hit is recorded as a FraudFlag.</summary>
@@ -147,7 +154,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
         return suspicious;
     }
 
-    private static Payment CreatePaymentFrom(string idempotencyKey, CreatePaymentRequest request)
+    private static Payment CreatePaymentFrom(string idempotencyKey, CreatePaymentRequest request, string cardFingerprint)
         => Payment.Create(
             idempotencyKey,
             request.MerchantReference,
@@ -156,6 +163,7 @@ public sealed class CreatePaymentUseCase : ICreatePaymentUseCase
             request.Currency,
             cardBin: CardBin(request),
             cardLast4: CardLast4(request),
+            cardFingerprint: cardFingerprint,
             cardCountry: StubCountry,
             customerIp: request.CustomerIp,
             ipCountry: StubCountry);
