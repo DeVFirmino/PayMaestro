@@ -1,5 +1,7 @@
 # PayMaestro — Mini Payment Orchestration API
 
+[![CI](https://github.com/DeVFirmino/PayMaestro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DeVFirmino/PayMaestro/actions/workflows/ci.yml)
+
 PayMaestro is a study project. It shows how payment orchestration works. One API stands in front of several payment gateways. The gateways are simulated and run inside the same process. No real money moves.
 
 ## What the software does
@@ -27,7 +29,7 @@ Every request must send an `Idempotency-Key` header.
 - When two requests race with the same key, a unique index picks one winner. The loser has charged nothing. It reads the winner's row and answers from it.
 - A key that is still in flight returns `409 Conflict`. The service does not charge again.
 - A finished key replays the stored result: the same payment id, status, attempt list and UTC creation time.
-- The same key with a different payload returns `422`. Every field counts: amount, currency, card number, customer, merchant reference and customer IP.
+- The same key with a different payload returns `422`. The compared fields are amount, currency, customer, merchant reference, customer IP and the card's BIN and last four digits. The full card number is never stored, so it cannot be compared (see [Known limits](#known-limits)).
 - Each gateway attempt sends a derived key: `{idempotency-key}:{gateway}:{attempt}`. The provider can then recognise a retry of the same attempt.
 
 ## Fraud screening
@@ -97,14 +99,16 @@ dotnet test
 
 - the payment state machine;
 - the cascade policy: approve, soft decline, hard decline, exception and unknown outcome;
-- the idempotency race: two concurrent requests against a real SQLite file, one charge only;
+- the idempotency race: two concurrent requests against a real SQLite file, one charge only ([`IdempotencyReservationTests`](tests/PayMaestro.Tests/IdempotencyReservationTests.cs));
 - replay, `409` and `422` answers, including the replayed UTC timestamp;
-- reconciliation, including the stale concurrent reconciler;
+- reconciliation, including the stale concurrent reconciler ([`ReconciliationTests`](tests/PayMaestro.Tests/ReconciliationTests.cs));
 - the HTTP contract over a real pipeline (`WebApplicationFactory`), including the empty `404` body.
 
 The decline-velocity rule has no automated test yet. I verified it by hand against the running API.
 
 ## Run it
+
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). The database is a local SQLite file, created on the first run in Development.
 
 ```bash
 dotnet run --project src/PayMaestro.API
@@ -140,7 +144,7 @@ More things to try:
 
 - Send `6000` EUR. AlphaPay has a `5000` cap, so BetaPay takes the charge directly.
 - Send a `JPY` amount. No gateway supports it. The payment is `Declined` with zero attempts.
-- Send the same `Idempotency-Key` again after completion. The stored result comes back. Change any field of the body and the answer is `422`.
+- Send the same `Idempotency-Key` again after completion. The stored result comes back. Change the amount, currency, customer, merchant reference, IP, or the first six or last four digits of the card, and the answer is `422`.
 - Decline card `…0000` three times. The fourth payment on that card is `FraudRejected` with an empty attempt list.
 - Send card `…9999`, then call `POST /api/payments/{id}/reconcile`. The payment becomes `Captured` with no second charge.
 
@@ -148,7 +152,10 @@ More things to try:
 
 - Stored `FraudFlag` rows are not part of any API response. A `FraudRejected` payment returns an empty attempt list and does not name the rule.
 - A missing `Idempotency-Key` header returns `400` with the framework's standard validation body, not the documented `ErrorResponse` shape.
-- A payment that a crashed process left in `Processing` cannot be settled. Reconcile returns `409` for it.
+- A payment can stay in `Processing` for good. The key is committed before any gateway call, so if the client cancels the request, the process crashes, or the final save fails after a gateway was called, the row stays in `Processing` with no stored attempt. A retry with that key gets `409`, and so does reconcile, because there is no attempt to ask the provider about. Nothing recovers it automatically.
+- The idempotency payload check sees the card only as BIN plus last four digits. Reusing a key with a card that differs only in the middle digits replays the stored result instead of returning `422`. It does not charge again.
+- The mock gateways keep their outcomes in memory (`MockProviderLedger`). After a restart they forget every key, so reconciling a payment that was waiting before the restart finds no record and marks it `Declined`, even if the simulated charge went through. A real provider keeps that record on its side.
+- There is no authentication. Any caller can create, read or reconcile any payment, and the idempotency key is unique across the whole service, not per merchant. A service with more than one merchant would need a merchant identity on every route and keys scoped to it.
 - A replayed response carries the same data, but the number format of `amount` can differ from the first response (for example `50` and `50.0`).
 
 ## Related certifications
@@ -158,4 +165,4 @@ More things to try:
 
 ## What's next
 
-More fraud rules on the same `IFraudRule` contract, as specified in [docs/SPEC.md](docs/SPEC.md): geo mismatch and amount anomaly. Then refunds, and CI/CD to Azure Container Apps — the same pipeline as my [Sports Betting API](https://github.com/DeVFirmino/SportsBetting), which runs there today.
+More fraud rules on the same `IFraudRule` contract, as specified in [docs/SPEC.md](docs/SPEC.md): geo mismatch and amount anomaly. Then refunds, and a deployment to Azure Container Apps. My [Sports Betting API](https://github.com/DeVFirmino/SportsBetting) was deployed there by hand, with Azure SQL, in September 2026, and is not kept online. Its [deployment notes](https://github.com/DeVFirmino/SportsBetting#deployment) list the steps.
