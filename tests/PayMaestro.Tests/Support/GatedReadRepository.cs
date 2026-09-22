@@ -42,6 +42,11 @@ public sealed class GatedReadRepository : IPaymentReadOnlyRepository
     public Task<Payment?> GetByIdAsync(Guid paymentId, CancellationToken cancellationToken)
         => _inner.GetByIdAsync(paymentId, cancellationToken);
 
+    public Task<IReadOnlyList<Payment>> GetProcessingWithoutAttemptsAsync(
+        DateTime reservedBefore,
+        CancellationToken cancellationToken)
+        => _inner.GetProcessingWithoutAttemptsAsync(reservedBefore, cancellationToken);
+
     public Task<int> CountRecentDeclinedAttemptsAsync(
         string cardBin,
         string cardLast4,

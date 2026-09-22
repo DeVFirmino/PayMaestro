@@ -42,7 +42,7 @@ namespace PayMaestro.Infrastructure.Migrations
 
                     b.HasIndex("PaymentId");
 
-                    b.ToTable("FraudFlags");
+                    b.ToTable("FraudFlags", (string)null);
                 });
 
             modelBuilder.Entity("PayMaestro.Domain.Entities.Payment", b =>
@@ -61,6 +61,11 @@ namespace PayMaestro.Infrastructure.Migrations
 
                     b.Property<string>("CardCountry")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CardFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CardLast4")
@@ -113,7 +118,7 @@ namespace PayMaestro.Infrastructure.Migrations
                     b.HasIndex("IdempotencyKey")
                         .IsUnique();
 
-                    b.ToTable("Payment", t =>
+                    b.ToTable("Payment", null, t =>
                         {
                             t.HasCheckConstraint("CK_Payment_Amount_Positive", "CAST(Amount AS REAL) > 0");
                         });
@@ -160,7 +165,31 @@ namespace PayMaestro.Infrastructure.Migrations
 
                     b.HasIndex("PaymentId");
 
-                    b.ToTable("PaymentAttempt");
+                    b.ToTable("PaymentAttempt", (string)null);
+                });
+
+            modelBuilder.Entity("PayMaestro.Infrastructure.PaymentGateways.ProviderLedgerRecord", b =>
+                {
+                    b.Property<string>("ProviderIdempotencyKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResponseCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("SettledAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProviderIdempotencyKey");
+
+                    b.ToTable("ProviderLedger", (string)null);
                 });
 
             modelBuilder.Entity("PayMaestro.Domain.Entities.FraudFlag", b =>

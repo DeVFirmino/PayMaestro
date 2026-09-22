@@ -17,7 +17,8 @@ public interface IPaymentGateway
 
     /// <summary>
     /// Asks the provider what happened to a key it may already have seen. Used to settle a
-    /// payment whose charge returned no answer.
+    /// payment whose charge returned no answer. Null means the provider has no record of the key,
+    /// which is the provider's word that it never took this charge.
     /// </summary>
-    Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken);
+    Task<GatewayResult?> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken);
 }

@@ -13,6 +13,13 @@ public enum PaymentStatus
 
     FraudRejected,
     Declined,
+
+    /// <summary>
+    /// The request ended before any gateway call was saved, and recovery found no provider with a
+    /// record of the charge. No money moved.
+    /// </summary>
+    FailedWithoutCharge,
+
     Authorized,
     Captured,
     Refunded

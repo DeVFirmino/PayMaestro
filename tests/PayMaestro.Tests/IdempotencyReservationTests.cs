@@ -139,15 +139,16 @@ public sealed class IdempotencyReservationTests
     public async Task ShouldReplayProviderOutcomeWhenShippedMockGatewaySeesSettledKey()
     {
         // Guards the contract the mocks are meant to demonstrate, not just the test doubles.
-        AlphaPayGateway gateway = new(new MockProviderLedger());
+        using PaymentDatabase db = new();
+        AlphaPayGateway gateway = new(db.NewProviderLedger());
         Payment payment = new PaymentBuilder().Build();
 
         GatewayResult first = await gateway.ProcessAsync(payment, "provider-key-1", CancellationToken.None);
         GatewayResult second = await gateway.ProcessAsync(payment, "provider-key-1", CancellationToken.None);
-        GatewayResult queried = await gateway.QueryAsync("provider-key-1", CancellationToken.None);
+        GatewayResult? queried = await gateway.QueryAsync("provider-key-1", CancellationToken.None);
 
         Assert.Equal(GatewayResultType.Approved, first.ResultType);
-        Assert.Same(first, second);          // the provider replays its own outcome
-        Assert.Same(first, queried);
+        Assert.Equal(first, second);         // the provider replays its own outcome
+        Assert.Equal(first, queried);
     }
 }

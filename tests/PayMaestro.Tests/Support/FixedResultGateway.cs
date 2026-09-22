@@ -29,6 +29,6 @@ public sealed class FixedResultGateway : IPaymentGateway
         return Task.FromResult(_result);
     }
 
-    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
-        => Task.FromResult(_result);
+    public Task<GatewayResult?> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
+        => Task.FromResult<GatewayResult?>(_result);
 }

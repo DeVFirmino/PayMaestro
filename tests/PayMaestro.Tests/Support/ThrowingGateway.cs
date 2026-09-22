@@ -20,6 +20,6 @@ public sealed class ThrowingGateway : IPaymentGateway
         CancellationToken cancellationToken)
         => throw new TimeoutException("The gateway never answered.");
 
-    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
-        => Task.FromResult(new GatewayResult(GatewayResultType.Uncertain, "unknown"));
+    public Task<GatewayResult?> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
+        => Task.FromResult<GatewayResult?>(new GatewayResult(GatewayResultType.Uncertain, "unknown"));
 }

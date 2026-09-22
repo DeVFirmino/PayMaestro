@@ -20,14 +20,16 @@ public static class DependencyInjectionExtension
     {
         string connectionString = configuration.GetConnectionString(ConnectionStringName) ?? DefaultConnectionString;
 
-        services.AddDbContext<PayMaestroDbContext>(options => options.UseSqlite(connectionString));
+        // The factory also registers the context as scoped, which the repositories and the unit
+        // of work share per request. The provider ledger uses the factory for contexts of its own.
+        services.AddDbContextFactory<PayMaestroDbContext>(options => options.UseSqlite(connectionString));
 
         services.AddScoped<IPaymentReadOnlyRepository, PaymentRepository>();
         services.AddScoped<IPaymentWriteOnlyRepository, PaymentRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 
         // The mock acquirers share one ledger so a key they already settled is recognised
-        // across requests, the way a real provider's idempotency contract behaves.
+        // across requests and restarts, the way a real provider's idempotency contract behaves.
         services.AddSingleton<MockProviderLedger>();
         services.AddScoped<IPaymentGateway, AlphaPayGateway>();
         services.AddScoped<IPaymentGateway, BetaPayGateway>();
