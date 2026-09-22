@@ -40,14 +40,14 @@ public abstract class MockGateway : IPaymentGateway
         string providerIdempotencyKey,
         CancellationToken cancellationToken)
     {
-        if (_ledger.Find(providerIdempotencyKey) is { } alreadySettled)
+        if (await _ledger.FindAsync(providerIdempotencyKey, cancellationToken) is { } alreadySettled)
         {
             return alreadySettled;          // the provider recognises the key: no second charge
         }
 
         await Task.Delay(Latency, cancellationToken);
 
-        GatewayResult settled = _ledger.Settle(providerIdempotencyKey, Decide(payment));
+        GatewayResult settled = await _ledger.SettleAsync(providerIdempotencyKey, Decide(payment), cancellationToken);
 
         if (payment.CardLast4 == UnansweredCard)
         {
@@ -57,8 +57,8 @@ public abstract class MockGateway : IPaymentGateway
         return settled;
     }
 
-    public Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
-        => Task.FromResult(_ledger.Find(providerIdempotencyKey) ?? NotFound);
+    public async Task<GatewayResult> QueryAsync(string providerIdempotencyKey, CancellationToken cancellationToken)
+        => await _ledger.FindAsync(providerIdempotencyKey, cancellationToken) ?? NotFound;
 
     /// <summary>Every mock declines the stolen test card and approves anything it has no rule for.</summary>
     protected virtual GatewayResult Decide(Payment payment)

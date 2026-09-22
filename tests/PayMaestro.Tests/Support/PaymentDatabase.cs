@@ -11,15 +11,17 @@ using PayMaestro.Domain.Gateways;
 using PayMaestro.Domain.Repositories.Payments;
 using PayMaestro.Infrastructure.Data;
 using PayMaestro.Infrastructure.Data.Repositories;
+using PayMaestro.Infrastructure.PaymentGateways;
 
 namespace PayMaestro.Tests.Support;
 
 /// <summary>
 /// A real SQLite file, so the unique index on the idempotency key and the concurrency stamp are
 /// enforced by the database instead of simulated. Each simulated request gets its own context,
-/// the way a scoped lifetime would give it one in the API.
+/// the way a scoped lifetime would give it one in the API. It is also the context factory the
+/// provider ledger opens its own contexts from, as the API's registered factory would.
 /// </summary>
-public sealed class PaymentDatabase : IDisposable
+public sealed class PaymentDatabase : IDisposable, IDbContextFactory<PayMaestroDbContext>
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"paymaestro-{Guid.NewGuid():N}.db");
 
@@ -33,6 +35,14 @@ public sealed class PaymentDatabase : IDisposable
         new DbContextOptionsBuilder<PayMaestroDbContext>()
             .UseSqlite($"Data Source={_path}")
             .Options);
+
+    public PayMaestroDbContext CreateDbContext() => NewContext();
+
+    /// <summary>
+    /// A ledger with nothing in memory. Two of these over the same database behave like one provider
+    /// before and after a restart: whatever the first recorded, the second can only read from disk.
+    /// </summary>
+    public MockProviderLedger NewProviderLedger() => new(this);
 
     public CreatePaymentUseCase NewCreatePaymentUseCase(
         PayMaestroDbContext context,

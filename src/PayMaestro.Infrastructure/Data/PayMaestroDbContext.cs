@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayMaestro.Domain.Entities;
+using PayMaestro.Infrastructure.PaymentGateways;
 
 namespace PayMaestro.Infrastructure.Data;
 
@@ -18,6 +19,12 @@ public sealed class PayMaestroDbContext : DbContext
 
     public DbSet<FraudFlag> FraudFlags => Set<FraudFlag>();
 
+    /// <summary>
+    /// The simulated acquirers' own records. A real provider keeps these on its side; they share
+    /// this database only so a local run needs one file, and nothing in the orchestrator reads them.
+    /// </summary>
+    public DbSet<ProviderLedgerRecord> ProviderLedger => Set<ProviderLedgerRecord>();
+
     // Timestamps are written with DateTime.UtcNow, but SQLite hands them back with an
     // Unspecified kind. Restamping them as UTC on the way out keeps a reloaded payment
     // identical to the one the original request answered with — serialized without the
@@ -31,6 +38,7 @@ public sealed class PayMaestroDbContext : DbContext
         ConfigurePayment(modelBuilder);
         ConfigurePaymentAttempt(modelBuilder);
         ConfigureFraudFlag(modelBuilder);
+        ConfigureProviderLedgerRecord(modelBuilder);
     }
 
     private static void ConfigurePayment(ModelBuilder modelBuilder)
@@ -98,5 +106,20 @@ public sealed class PayMaestroDbContext : DbContext
         flag.Property(entity => entity.RuleName).IsRequired().HasMaxLength(50);
         flag.Property(entity => entity.Details).IsRequired().HasMaxLength(500);
         flag.Property(entity => entity.CreatedAt).HasConversion(UtcTimestamp);
+    }
+
+    private static void ConfigureProviderLedgerRecord(ModelBuilder modelBuilder)
+    {
+        EntityTypeBuilder<ProviderLedgerRecord> record = modelBuilder.Entity<ProviderLedgerRecord>();
+
+        record.ToTable("ProviderLedger");
+
+        // The key is the provider's deduplication contract: the primary key makes a second
+        // outcome for the same key impossible, not just unlikely.
+        record.HasKey(entity => entity.ProviderIdempotencyKey);
+        record.Property(entity => entity.ProviderIdempotencyKey).HasMaxLength(200);
+        record.Property(entity => entity.ResultType).HasConversion<string>().HasMaxLength(20);
+        record.Property(entity => entity.ResponseCode).IsRequired().HasMaxLength(20);
+        record.Property(entity => entity.SettledAt).HasConversion(UtcTimestamp);
     }
 }
