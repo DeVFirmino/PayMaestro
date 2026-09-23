@@ -29,11 +29,11 @@ public sealed class PaymentsController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Create(
         [FromServices] ICreatePaymentUseCase useCase,
-        [FromHeader(Name = "Idempotency-Key")] string idempotencyKey,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         [FromBody] CreatePaymentRequest request,
         CancellationToken cancellationToken)
     {
-        PaymentResponse response = await useCase.Execute(idempotencyKey, request, cancellationToken);
+        PaymentResponse response = await useCase.Execute(idempotencyKey ?? string.Empty, request, cancellationToken);
 
         return Ok(response);
     }
@@ -89,14 +89,14 @@ public sealed class PaymentsController : ControllerBase
     /// <response code="404">No payment exists with this id.</response>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         [FromServices] IGetPaymentByIdUseCase useCase,
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        PaymentResponse? response = await useCase.Execute(id, cancellationToken);
+        PaymentResponse response = await useCase.Execute(id, cancellationToken);
 
-        return response is null ? NotFound() : Ok(response);
+        return Ok(response);
     }
 }

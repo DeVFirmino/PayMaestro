@@ -1,8 +1,11 @@
 using PayMaestro.API;
 using PayMaestro.API.Filters;
 using PayMaestro.Application;
+using PayMaestro.Application.Contracts;
+using PayMaestro.Domain.Exceptions;
 using PayMaestro.Infrastructure;
 using PayMaestro.Infrastructure.Data;
+using Microsoft.AspNetCore.Mvc;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -10,9 +13,12 @@ builder.Services.AddApplication(builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddControllers(options => options.Filters.Add<ExceptionFilter>())
-    // An empty status result must reach the client as-is: GET of an unknown payment answers
-    // 404 with an empty body, not a synthesized ProblemDetails envelope.
-    .ConfigureApiBehaviorOptions(options => options.SuppressMapClientErrors = true);
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.SuppressMapClientErrors = true;
+        options.InvalidModelStateResponseFactory = _ => new BadRequestObjectResult(
+            new ErrorResponse { Error = ErrorMessages.InvalidRequest });
+    });
 builder.Services.AddApiDocumentation();
 
 WebApplication app = builder.Build();

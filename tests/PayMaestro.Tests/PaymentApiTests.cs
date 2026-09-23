@@ -19,12 +19,33 @@ public sealed class PaymentApiTests : IClassFixture<PaymentApiFactory>
     }
 
     [Fact]
-    public async Task ShouldAnswer404WithEmptyBodyWhenPaymentIsUnknown()
+    public async Task ShouldAnswer404WithErrorContractWhenPaymentIsUnknown()
     {
         HttpResponseMessage response = await _client.GetAsync($"/api/payments/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Contains("No payment exists", body.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task ShouldAnswer400WithErrorContractWhenIdempotencyKeyIsMissing()
+    {
+        HttpResponseMessage response = await PostPaymentAsync(null, "4111111111117777");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Idempotency-Key header is required.", body.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task ShouldAnswer400WithErrorContractWhenRequestValidationFails()
+    {
+        HttpResponseMessage response = await PostPaymentAsync(Guid.NewGuid().ToString(), "4111111111117777", 0m);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Request validation failed.", body.RootElement.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -65,6 +86,8 @@ public sealed class PaymentApiTests : IClassFixture<PaymentApiFactory>
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, second.StatusCode);
+        using JsonDocument error = JsonDocument.Parse(await second.Content.ReadAsStringAsync());
+        Assert.True(error.RootElement.GetProperty("error").GetString()!.Length > 0);
 
         // The refused request reached no provider: the stored payment still has its one attempt.
         using JsonDocument stored = JsonDocument.Parse(await _client.GetStringAsync($"/api/payments/{paymentId}"));
@@ -81,7 +104,7 @@ public sealed class PaymentApiTests : IClassFixture<PaymentApiFactory>
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("payments").ValueKind);
     }
 
-    private async Task<HttpResponseMessage> PostPaymentAsync(string idempotencyKey, string cardNumber)
+    private async Task<HttpResponseMessage> PostPaymentAsync(string? idempotencyKey, string cardNumber, decimal amount = 50m)
     {
         using HttpRequestMessage request = new(HttpMethod.Post, "/api/payments")
         {
@@ -89,13 +112,16 @@ public sealed class PaymentApiTests : IClassFixture<PaymentApiFactory>
             {
                 merchantReference = "ORDER-1",
                 customerId = "cust-1",
-                amount = 50m,
+                amount,
                 currency = "EUR",
                 cardNumber,
                 customerIp = "203.0.113.10",
             }),
         };
-        request.Headers.Add("Idempotency-Key", idempotencyKey);
+        if (idempotencyKey is not null)
+        {
+            request.Headers.Add("Idempotency-Key", idempotencyKey);
+        }
 
         return await _client.SendAsync(request);
     }

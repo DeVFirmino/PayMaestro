@@ -47,7 +47,7 @@ The full card number is never stored. To compare cards on replay, the service co
 
 Fraud rules implement the `IFraudRule` contract in the Domain layer. They run after the key is reserved and before any gateway call. Each hit is stored as a `FraudFlag` row.
 
-One rule is active: **decline velocity**. It counts declined attempts for one card, identified by BIN and last four digits. Three or more declines in 24 hours block the card. The payment ends `FraudRejected` with zero gateway calls.
+One rule is active: **decline velocity**. It counts declined attempts for one card, identified by its keyed fingerprint. Three or more declines in 24 hours block the card. The payment ends `FraudRejected` with zero gateway calls.
 
 ## Routing and the cascade
 
@@ -123,7 +123,7 @@ Clean architecture: `API → Application → Domain ← Infrastructure`.
 dotnet test
 ```
 
-65 xUnit tests cover:
+71 xUnit tests cover:
 
 - the payment state machine;
 - the cascade policy: approve, soft decline, hard decline, exception and unknown outcome;
@@ -132,9 +132,8 @@ dotnet test
 - the card fingerprint and the startup check on its key;
 - reconciliation, including the stale concurrent reconciler and a reconcile through a fresh provider ledger after a restart ([`ReconciliationTests`](tests/PayMaestro.Tests/ReconciliationTests.cs));
 - recovery of payments stuck in `Processing`: settled from a provider record, failed without charge, cascade order, threshold and payments it must leave alone ([`OrphanRecoveryTests`](tests/PayMaestro.Tests/OrphanRecoveryTests.cs));
-- the HTTP contract over a real pipeline (`WebApplicationFactory`), including the empty `404` body.
-
-The decline-velocity rule has no automated test yet. I verified it by hand against the running API.
+- the decline-velocity threshold, 24-hour window and cards sharing a BIN and last four digits;
+- the HTTP error contract over a real pipeline (`WebApplicationFactory`), including validation and `404` responses.
 
 ## Run it
 
@@ -182,7 +181,6 @@ More things to try:
 ## Known limits
 
 - Stored `FraudFlag` rows are not part of any API response. A `FraudRejected` payment returns an empty attempt list and does not name the rule.
-- A missing `Idempotency-Key` header returns `400` with the framework's standard validation body, not the documented `ErrorResponse` shape.
 - Recovery does not run by itself. Something has to call `POST /api/payments/recovery`, by hand or on a schedule.
 - Recovery derives the provider keys from the current gateway configuration. If the route of a payment changed between its request and the recovery run, the keys differ and recovery can miss a provider record.
 - There is no authentication. Any caller can create, read or reconcile any payment, and the idempotency key is unique across the whole service, not per merchant. A service with more than one merchant would need a merchant identity on every route and keys scoped to it.

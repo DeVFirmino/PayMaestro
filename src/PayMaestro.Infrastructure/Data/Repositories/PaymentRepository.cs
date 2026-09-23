@@ -36,15 +36,14 @@ public sealed class PaymentRepository : IPaymentReadOnlyRepository, IPaymentWrit
             .ToListAsync(cancellationToken);
 
     public Task<int> CountRecentDeclinedAttemptsAsync(
-        string cardBin,
-        string cardLast4,
+        string cardFingerprint,
         TimeSpan window,
         CancellationToken cancellationToken)
     {
         DateTime cutoff = DateTime.UtcNow - window;
 
         return _context.Payments
-            .Where(payment => payment.CardBin == cardBin && payment.CardLast4 == cardLast4)
+            .Where(payment => payment.CardFingerprint == cardFingerprint)
             .SelectMany(payment => payment.Attempts)
             .CountAsync(
                 attempt => attempt.CreatedAt >= cutoff

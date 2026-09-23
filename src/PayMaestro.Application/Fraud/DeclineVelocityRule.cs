@@ -26,8 +26,7 @@ public sealed class DeclineVelocityRule : IFraudRule
     public async Task<FraudVerdict> EvaluateAsync(Payment payment, CancellationToken cancellationToken)
     {
         int declines = await _payments.CountRecentDeclinedAttemptsAsync(
-            payment.CardBin,
-            payment.CardLast4,
+            payment.CardFingerprint,
             Window,
             cancellationToken);
 
