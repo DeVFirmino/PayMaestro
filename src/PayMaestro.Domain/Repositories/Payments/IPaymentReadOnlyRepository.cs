@@ -17,8 +17,7 @@ public interface IPaymentReadOnlyRepository
         CancellationToken cancellationToken);
 
     Task<int> CountRecentDeclinedAttemptsAsync(
-        string cardBin,
-        string cardLast4,
+        string cardFingerprint,
         TimeSpan window,
         CancellationToken cancellationToken);
 }

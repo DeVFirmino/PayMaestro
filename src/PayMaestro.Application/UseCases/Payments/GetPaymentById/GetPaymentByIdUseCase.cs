@@ -1,5 +1,6 @@
 using PayMaestro.Application.Contracts;
 using PayMaestro.Domain.Entities;
+using PayMaestro.Domain.Exceptions;
 using PayMaestro.Domain.Repositories.Payments;
 
 namespace PayMaestro.Application.UseCases.Payments.GetPaymentById;
@@ -13,10 +14,11 @@ public sealed class GetPaymentByIdUseCase : IGetPaymentByIdUseCase
         _payments = payments;
     }
 
-    public async Task<PaymentResponse?> Execute(Guid paymentId, CancellationToken cancellationToken)
+    public async Task<PaymentResponse> Execute(Guid paymentId, CancellationToken cancellationToken)
     {
-        Payment? payment = await _payments.GetByIdAsync(paymentId, cancellationToken);
+        Payment payment = await _payments.GetByIdAsync(paymentId, cancellationToken)
+            ?? throw new PaymentNotFoundException(paymentId);
 
-        return payment?.ToResponse();
+        return payment.ToResponse();
     }
 }
