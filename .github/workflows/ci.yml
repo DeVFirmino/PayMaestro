@@ -28,6 +28,8 @@ jobs:
           ! grep -q "has the following vulnerable packages" vulnerable.txt
       - name: Build
         run: dotnet build --configuration Release --no-restore
+      - name: Verify formatting
+        run: dotnet format --verify-no-changes --no-restore
       - name: Test
         run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=tests.trx"
       - name: Upload test results

@@ -48,9 +48,8 @@ public sealed class GatedReadRepository : IPaymentReadOnlyRepository
         => _inner.GetProcessingWithoutAttemptsAsync(reservedBefore, cancellationToken);
 
     public Task<int> CountRecentDeclinedAttemptsAsync(
-        string cardBin,
-        string cardLast4,
+        string cardFingerprint,
         TimeSpan window,
         CancellationToken cancellationToken)
-        => _inner.CountRecentDeclinedAttemptsAsync(cardBin, cardLast4, window, cancellationToken);
+        => _inner.CountRecentDeclinedAttemptsAsync(cardFingerprint, window, cancellationToken);
 }
