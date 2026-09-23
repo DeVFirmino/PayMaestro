@@ -195,4 +195,4 @@ More things to try:
 
 ## What's next
 
-More fraud rules on the same `IFraudRule` contract, as specified in [docs/SPEC.md](docs/SPEC.md): geo mismatch and amount anomaly. Then refunds, and a deployment to Azure Container Apps. My [Sports Betting API](https://github.com/DeVFirmino/SportsBetting) was deployed there by hand, with Azure SQL, in September 2026, and is not kept online. Its [deployment notes](https://github.com/DeVFirmino/SportsBetting#deployment) list the steps.
+More fraud rules on the same `IFraudRule` contract, as specified in [docs/SPEC.md](docs/SPEC.md): geo mismatch and amount anomaly. Then refunds, and a deployment to Azure Container Apps. My [Sports Betting API](https://github.com/DeVFirmino/SportsBetting) was deployed there by hand, with Azure SQL, in September 2026, and is [online](https://sportsbetting-api.nicewave-b8afa4cf.westeurope.azurecontainerapps.io/swagger/index.html), scaling to zero when idle. Its [deployment notes](https://github.com/DeVFirmino/SportsBetting#deployment) list the steps.
