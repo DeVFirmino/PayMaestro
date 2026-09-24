@@ -4,9 +4,31 @@
 
 PayMaestro is a study project in .NET: a payment flow with simulated providers, built around not charging twice when a request is repeated or times out.
 
+[Run it locally](#run-it) · [Try one payment](#try-one-payment)
+
 What it does not have: the providers are simulated inside the same process and no real money moves, there is no merchant authentication, and the idempotency key is unique across the whole service rather than per merchant.
 
 One API stands in front of several payment gateways. The sections below explain how it behaves when a request is repeated, when a provider does not answer, and when a request dies halfway.
+
+## Try one payment
+
+Follow [Run it](#run-it) to start the API, then send this request from another terminal:
+
+```bash
+curl -i http://localhost:5225/api/payments \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: 93747c29-68d8-4d3c-b0bb-0ddab07ac1e5' \
+  -d '{
+    "merchantReference": "ORDER-001",
+    "customerId": "customer-42",
+    "amount": 50,
+    "currency": "EUR",
+    "cardNumber": "4111111111111111",
+    "customerIp": "185.89.10.20"
+  }'
+```
+
+With a fresh local database and the default configuration, expect HTTP `200` with payment status `Captured` and two gateway attempts: AlphaPay soft-declines this card, then BetaPay approves it. Both providers are simulated. Run the same command again to get the stored result without another charge.
 
 ## What the software does
 
