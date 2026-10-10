@@ -8,6 +8,8 @@ A .NET payment API that chooses a provider, handles declines and avoids charging
 
 [Run it](#run-it) · [Try a payment](#try-one-payment) · [How it works](docs/payment-guide.md)
 
+![Animation: you pay €50 by card, the first provider declines, PayMaestro tries the next one, it approves, and you are charged once.](docs/how-it-works.gif)
+
 ## What happens to a payment
 
 - A provider temporarily declines: try the next eligible provider.
