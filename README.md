@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/DeVFirmino/PayMaestro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DeVFirmino/PayMaestro/actions/workflows/ci.yml)
 
-A .NET payment API that chooses a provider, handles declines and avoids charging twice when a request is repeated. The providers are simulated and no real money moves.
+Run this .NET API with simulated providers to see what happens after a card decline. A temporary decline can route the payment to another provider. A hard decline ends the attempt.
 
 .NET 10 · ASP.NET Core · EF Core · SQLite · xUnit
 
